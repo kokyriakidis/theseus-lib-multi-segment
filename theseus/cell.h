@@ -33,6 +33,7 @@
 #include <typeinfo>
 
 #include "vector.h"
+#include "theseus/graph.h"
 
 /**
  * Defines the Cell structure used in the Theseus alignment algorithm.
@@ -51,6 +52,8 @@
 
 namespace theseus {
 
+using NodeId = Graph::NodeId;
+
 constexpr ptrdiff_t realloc_wavefront_policy(std::ptrdiff_t capacity,
                                              std::ptrdiff_t required_size)
 {
@@ -62,7 +65,7 @@ constexpr ptrdiff_t realloc_wavefront_policy(std::ptrdiff_t capacity,
 struct Cell {
     using CellVector = Vector<Cell, true>;
 
-    using vertex_t = int32_t; // TODO: This should be here?
+    using vertex_t = NodeId;
     using idx2d_t = int32_t;
     using pos_t = int64_t;
     using score_t = int32_t;

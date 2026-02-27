@@ -29,6 +29,7 @@
 #pragma once
 
 #include <vector>
+#include "theseus/graph.h"
 #include "theseus/penalties.h"
 
 /**
@@ -39,20 +40,59 @@
 
 namespace theseus {
 
+using NodeId = Graph::NodeId;
+
 class Alignment {
     public:
-    /**
-     * @brief Backtrace objects: similar to the CIGAR in sequence alignment. It consists
-     *        of the set of edit operations of the alignment and the path of the alignment
-     *        through the reference graph.
-     */
-      std::vector<char> edit_op; // Edit operations
-      std::vector<int> path;     // Path of the alignment
-      int start_offset;      // Start offset in the first vertex of the path
-      int end_offset;        // End offset in the last vertex of the path
+    /*
+    * Error codes & messages
+    */
+    // [OK]
+    #define THESEUS_STATUS_ALG_COMPLETED            0  // Success (Complete alignment found)
+    #define THESEUS_STATUS_ALG_PARTIAL              1  // Success (Partial alignment found)
+    // [FAIL]
+    #define THESEUS_STATUS_MAX_STEPS_REACHED     -100  // Maximum number of Theseus-steps reached
+    #define THESEUS_STATUS_UNATTAINABLE          -300  // Alignment unattainable under configured heuristics
+    // [INTERNAL]
+    #define THESEUS_STATUS_OK                      -1  // Computing alignment (in progress)
+    #define THESEUS_STATUS_END_REACHED             -2  // Alignment end reached
+    #define THESEUS_STATUS_END_UNREACHABLE         -3  // Alignment end unreachable under current configuration (eg advancement density)
 
 
-      // Compute the affine gap score of the CIGAR,
+    /*
+    * Error messages
+    */
+    // OK
+    #define THESEUS_STATUS_ALG_COMPLETED_MSG           "[Theseus] Alignment completed successfully"
+    #define THESEUS_STATUS_ALG_PARTIAL_MSG             "[Theseus] Alignment extension computed (partial alignment)"
+    #define THESEUS_STATUS_ALG_COMPLETED_MSG_SHORT     "OK.Full"
+    #define THESEUS_STATUS_ALG_PARTIAL_MSG_SHORT       "OK.Partial"
+    // FAILED
+    #define THESEUS_STATUS_MAX_STEPS_REACHED_MSG       "[Theseus] Alignment failed. Maximum Theseus-steps limit reached"
+    #define THESEUS_STATUS_UNATTAINABLE_MSG            "[Theseus] Alignment failed. Unattainable under configured heuristics"
+    #define THESEUS_STATUS_MAX_STEPS_REACHED_MSG_SHORT "FAILED.MaxTheseusSteps"
+    #define THESEUS_STATUS_UNATTAINABLE_MSG_SHORT      "FAILED.Unattainable"
+    // Internal
+    #define THESEUS_STATUS_END_REACHED_MSG             "[Theseus] Alignment end reached"
+    #define THESEUS_STATUS_END_UNREACHABLE_MSG         "[Theseus] Alignment end unreachable under current configuration (due to heuristics)"
+    #define THESEUS_STATUS_UNKNOWN_MSG                 "[Theseus] Unknown error code"
+    #define THESEUS_STATUS_END_REACHED_MSG_SHORT       "INTERNAL.Reached"
+    #define THESEUS_STATUS_END_UNREACHABLE_MSG_SHORT   "INTERNAL.Dropped"
+    #define THESEUS_STATUS_UNKNOWN_MSG_SHORT           "Unknown"
+
+
+      /**
+       * @brief Backtrace objects: similar to the CIGAR in sequence alignment. It consists
+       *        of the set of edit operations of the alignment and the path of the alignment
+       *        through the reference graph.
+       */
+      std::vector<char> edit_op;    // Edit operations
+      std::vector<NodeId> path;     // Path of the alignment
+      int start_offset;             // Start offset in the first vertex of the path
+      int end_offset;               // End offset in the last vertex of the path
+      int theseus_status;           // Alignment status
+
+
       /**
        * @brief Compute the affine gap score of the CIGAR. This is due to the fact
        * that we use equivalent internal penalties during the alignment stage that

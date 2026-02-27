@@ -27,3 +27,9 @@
 
 
 #include "theseus/alignment.h"
+
+// const char* get_msg(int error_code) {
+//     if (error_code == THESEUS_STATUS_ALG_COMPLETED) return THESEUS_STATUS_ALG_COMPLETED_MSG;
+//     else if (error_code == THESEUS_STATUS_ALG_PARTIAL) return ;
+//     else if (error_code == THESEUS_STATUS_MAX_STEPS_REACHED) return ;
+// }

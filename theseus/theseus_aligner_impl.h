@@ -33,11 +33,13 @@
 #include <queue>
 #include <set>
 #include <algorithm>
+#include <ranges>
 
 #include "theseus/alignment.h"
 #include "theseus/penalties.h"
+#include "theseus/heuristics.h"
+#include "theseus/graph.h"
 
-#include "graph.h"
 #include "beyond_scope.h"
 #include "cell.h"
 #include "scope.h"
@@ -49,9 +51,15 @@
 
 namespace theseus {
 
+using NodeId       = Graph::NodeId;
+using NodeView     = Graph::NodeView;
+using NodeIdRange  = Graph::NodeIdRange;
+using SequenceView = Graph::SequenceView;
+
 class TheseusAlignerImpl {
 public:
     TheseusAlignerImpl(const Penalties &penalties,
+                       const Heuristics &heuristics,
                        Graph &&graph,
                        bool msa);
 
@@ -62,18 +70,22 @@ public:
      * @param seq               Sequence to be aligned
      * @param start_node        Starting node in the graph
      * @param start_offset      Starting offset within the starting node
+     * @param reverse_alignment  Whether to perform reverse alignment
+     *
      * @return                  Alignment object
      */
     Alignment align(std::string_view seq,
-                    std::string &start_node,
-                    int start_offset = 0);
+                    NodeId &start_node,
+                    int start_offset = 0,
+                    bool reverse_alignment = false);
 
     /**
      * @brief Output the current graph in GFA format.
      *
-     * @param out_stream  Output stream to write the graph in GFA format
+     * @param gfa_output  Output stream to write the graph in GFA format
+     * @param node_names  Vector containing the names of the nodes in the graph (in the same order as their IDs)
      */
-    void print_as_gfa(std::ofstream &out_stream);
+    void print_as_gfa(std::ofstream &gfa_output);
 
     /**
      * @brief Output the current MSA in MSA format.
@@ -93,7 +105,7 @@ public:
      * @brief Print the graph in dot (graphviz) format
      *
      */
-    void print_as_dot(std::ofstream &out_stream);
+    void print_code_graphviz(std::ofstream &out_stream);
 
     /**
      * @brief Print the resulting alignment in GAF format.
@@ -104,23 +116,25 @@ public:
     void print_as_gaf(
             theseus::Alignment &alignment,
             std::ostream &out_stream,
-            std::string seq_name);
+            std::string seq_name,
+            std::unordered_map<NodeId, std::string> &node_names);
 
 private:
     /**
      * @brief Initialize the data for a new alignment.
      *
      */
-    void new_alignment();
+    void new_alignment(SequenceView seq,
+                       bool reverse_alignment);
 
     /**
      * @brief Process a given vertex at a given _score. This means performing
      * the next and extend operations.
      *
-     * @param curr_v
-     * @param v
+     * @param curr_node_id
      */
-    void process_vertex(Graph::vertex *curr_v, int v);
+    void process_vertex(
+        NodeId curr_node_id);
 
     /**
      * @brief Compute the wave for a given score for all active vertices.
@@ -132,189 +146,184 @@ private:
      * @brief Sparsify the M data. This means storing the data in the scratchpad
      * to be later processed.
      *
-     * @param curr_v
      * @param dense_wf
      * @param offset_increase
      * @param shift_factor
-     * @param start_idx
-     * @param end_idx
+     * @param cells_range
      * @param m
      * @param upper_bound
-     * @param vertex_id
-     * @param new_score_diff
-     * @param prev_matrix
      */
-    void sparsify_M_data(Cell::CellVector &dense_wf,
-                         int offset_increase,
-                         int shift_factor,
-                         Scope::range cells_range,
-                         int m,
-                         int upper_bound);
+    void sparsify_M_data(
+        Cell::CellVector &dense_wf,
+        int offset_increase,
+        int shift_factor,
+        Scope::range cells_range,
+        int m,
+        int upper_bound);
 
     /**
      * @brief Sparsify the jumps data. This means storing the data in the scratchpad
      * to be later processed.
      *
-     * @param curr_v
      * @param dense_wf
+     * @param jumps_positions
      * @param offset_increase
      * @param shift_factor
-     * @param start_idx
-     * @param end_idx
      * @param m
      * @param upper_bound
-     * @param vertex_id
-     * @param new_score_diff
-     * @param prev_matrix
+     * @param from_matrix
      */
-    void sparsify_jumps_data(Cell::CellVector &dense_wf,
-                             std::vector<Cell::pos_t> &jumps_positions,
-                             int offset_increase,
-                             int shift_factor,
-                             int m,
-                             int upper_bound,
-                             Cell::Matrix from_matrix);
+    void sparsify_jumps_data(
+        Cell::CellVector &dense_wf,
+        std::vector<Cell::pos_t> &jumps_positions,
+        int offset_increase,
+        int shift_factor,
+        int m,
+        int upper_bound,
+        Cell::Matrix from_matrix);
 
     /**
      * @brief Sparsify the indel (coming from I or D) data. This means storing
      * the data in the scratchpad to be later processed.
      *
-     * @param curr_v
      * @param dense_wf
      * @param offset_increase
      * @param shift_factor
-     * @param start_idx
-     * @param end_idx
+     * @param cells_range
      * @param m
      * @param upper_bound
-     * @param vertex_id
-     * @param new_score_diff
-     * @param prev_matrix
      */
-    void sparsify_indel_data(Cell::CellVector &dense_wf,
-                             int offset_increase,
-                             int shift_factor,
-                             Scope::range cells_range,
-                             int m,
-                             int upper_bound);
+    void sparsify_indel_data(
+        Cell::CellVector &dense_wf,
+        int offset_increase,
+        int shift_factor,
+        Scope::range cells_range,
+        int m,
+        int upper_bound);
 
     /**
      * @brief Compute the next I matrix for a vertex v. This implies both sparsifying
      * the data in the scratchpad and storing it back on the new wavefront, once the
      * corresponding maximums and checks have been done.
      *
-     * @param curr_v
      * @param upper_bound // Maximum value of the diagonal
-     * @param v
+     * @param curr_node_id
      */
-    void next_I(Graph::vertex *curr_v, int upper_bound, int v);
-
+    void next_I(
+        int upper_bound,
+        NodeId curr_node_id);
 
     /**
      * @brief Compute the next D matrix for a vertex v. This implies both sparsifying
      * the data in the scratchpad and storing it back on the new wavefront, once the
      * corresponding maximums and checks have been done.
      *
-     * @param curr_v
      * @param upper_bound // Maximum value of the diagonal
-     * @param v
+     * @param curr_node_id
      */
-    void next_D(int upper_bound, int v);
-
+    void next_D(
+        int upper_bound,
+        NodeId curr_node_id);
 
     /**
      * @brief Compute the next M matrix for a vertex v. This implies both sparsifying
      * the data in the scratchpad and storing it back on the new wavefront, once the
      * corresponding maximums and checks have been done.
      *
-     * @param curr_v
      * @param upper_bound // Maximum value of the diagonal
-     * @param v
+     * @param curr_node_id
      */
-    void next_M(int upper_bound, int v);
+    void next_M(
+        int upper_bound,
+        NodeId curr_node_id);
 
     /**
      * @brief Invalidate the diagonal associated to a jump in M, activate the newly
      * discovered vertices and store the jump in the neighbours.
      *
-     * @param curr_v
+     * @param curr_node
      * @param prev_cell
      * @param prev_pos
-     * @param prev_matrix
-     * @param _score_diff
+     * @param from_matrix
      */
-    void store_M_jump(Graph::vertex *curr_v,
-                      Cell &prev_cell,
-                      Cell::pos_t prev_pos,
-                      Cell::Matrix from_matrix);
+    void store_M_jump(
+        NodeView curr_node,
+        Cell &prev_cell,
+        Cell::pos_t prev_pos,
+        Cell::Matrix from_matrix);
 
     /**
      * @brief Invalidate the diagonal associated to a jump in I, activate the newly
      * discovered vertices and store the jump in the neighbours.
      *
-     * @param curr_v
+     * @param curr_node
      * @param prev_cell
      * @param prev_pos
-     * @param prev_matrix
+     * @param from_matrix
      */
-    void store_I_jump(Graph::vertex *curr_v,
-                      Cell &prev_cell,
-                      Cell::pos_t prev_pos,
-                      Cell::Matrix from_matrix);
+    void store_I_jump(
+        NodeView curr_node,
+        Cell &prev_cell,
+        Cell::pos_t prev_pos,
+        Cell::Matrix from_matrix);
 
     /**
      * @brief Check and store I jumps (that is, those diagonals that have reached
      * the last column of a vertex for matrix I).
      *
-     * @param curr_v
+     * @param curr_node
      * @param curr_wavefront
-     * @param start_idx
-     * @param end_idx
-     * @param v
+     * @param cell_range
      */
-    void check_and_store_jumps(Graph::vertex *curr_v,
-                               Cell::CellVector &curr_wavefront,
-                               Scope::range cell_range);
+    void check_and_store_jumps(
+        NodeView curr_node,
+        Cell::CellVector &curr_wavefront,
+        Scope::range cell_range);
 
     /**
-     * @brief Longest Common Prefix of two sequences.
+     * @brief Longest Common Prefix of two sequences. The first sequence is always
+     * the query _seq.
      *
-     * @param seq_1
-     * @param seq_2
+     * @param text
      * @param offset
      * @param j
      */
-    void LCP(std::string_view query,
-            std::string &vertex_text,
-            int &offset,
-            int &j);
+    void LCP(
+        NodeView &curr_node,
+        int &offset,
+        int &j);
 
     /**
      * @brief Check the end condition for the alignment.
      *
      * @param curr_data
-     * @param j
-     * @param v
      */
-    void check_end_condition(Cell curr_data, int j, int v);
+    void check_end_condition(
+        Cell curr_data,
+        Cell::Matrix curr_matrix);
 
     /**
      * @brief Exyend a given diagonal for a given vertex and perform the necessary
      * jumps.
      *
-     * @param curr_v
+     * @param curr_node
      * @param curr_cell
-     * @param v
      * @param prev_cell
      * @param prev_pos
      * @param prev_matrix
      */
-    void extend_diagonal(Graph::vertex *curr_v,
-                         Cell &curr_cell,
-                         int v,
-                         Cell &prev_cell,
-                         Cell::pos_t prev_pos,
-                         Cell::Matrix from_matrix);
+    void extend_diagonal(
+        NodeId curr_node_id,
+        Cell &curr_cell,
+        Cell &prev_cell,
+        Cell::pos_t prev_pos,
+        Cell::Matrix from_matrix);
+
+    /**
+     * @brief Initialize the partial backtrace, by finding the starting cell for backtrace.
+     *
+     */
+    void init_partial_backtrace();
 
     /**
      * @brief Add matches to our backtracking vector.
@@ -346,26 +355,37 @@ private:
      * @brief Perform a single step of the backtrace process.
      *
      * @param curr_cell
-     * @param curr_v
+     * @param curr_matrix
      */
-    void one_backtrace_step(Cell &curr_cell);
+    void one_backtrace_step(
+        Cell &curr_cell,
+        Cell::Matrix &curr_matrix);
 
     /**
      * @brief Backtrace the alignment from the end vertex to the start vertex.
      *
-     * @param initial_vertex
      */
-    void backtrace(
-        int initial_vertex);
+    void backtrace();
+
 
     /**
-     * @brief Add a sequence to the graph. This is done by adding the sequence to
-     * the graph and then adding the corresponding edges.
+     * @brief Internal function to print the graph in GFA format. This is used by
+     * the public print_as_gfa function, which is the one that should be called by the user.
      *
-     * @param seq Sequence to add
+     * @param gfa_output
      */
-    void add_to_graph(std::string_view seq);
+    void print_as_gfa_internal(std::ofstream &gfa_output);
 
+    /**
+     * @brief Internal function to print the graph in dot (graphviz) format.
+     *
+     * @param out_stream Output stream to write the graph in dot format
+     */
+    void print_code_graphviz_internal(std::ofstream &out_stream);
+
+    // Handle reverse alignment
+    NodeView get_node(NodeId id);
+    bool has_out_nodes(NodeId id);
 
     int32_t _score = 0;
 
@@ -377,12 +397,13 @@ private:
     std::unique_ptr<POAGraph> _poa_graph; // Partial order alignment graph for MSA
 
     bool _is_msa;
-    bool _end = false;
-    int _end_vertex;
+    bool _reversed_alignment;
+    // int _end_vertex;
     int _seq_ID = 0;
-    int _start_node;
+    NodeId _start_node;
     int _start_offset;
     Cell _start_pos;
+    Cell::Matrix _start_matrix;
 
     std::unique_ptr<ScratchPad> _scratchpad;
 
@@ -391,7 +412,9 @@ private:
 
     std::unique_ptr<VerticesData> _vertices_data;
 
-    std::string_view _seq;
+    SequenceView _seq;
+
+    Heuristics _heuristics;
 
     Alignment _alignment;
 };

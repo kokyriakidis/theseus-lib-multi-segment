@@ -34,10 +34,13 @@
 // #include <type_traits>
 
 #include "cell.h"
+#include "theseus/graph.h"
 #include "theseus/penalties.h"
 
 
 namespace theseus {
+
+using NodeId = Graph::NodeId;
 
 /**
  * @brief Class vertices data. It stores the data related to the active vertices,
@@ -68,7 +71,7 @@ public:
      * - Positions of the jumps in the MJ and IJ (I2) matrices.
      */
     struct VertexData {
-        Cell::vertex_t vertex_id;
+        NodeId vertex_id;
 
         std::vector<InvalidData> _m_invalid;
 

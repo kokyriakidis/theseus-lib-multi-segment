@@ -34,36 +34,246 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
+#include <limits>
+#include <cassert>
+#include <unordered_map>
 
+#include <handlegraph/handle_graph.hpp>
 
 #include "theseus/alignment.h"
+#include "theseus/graph.h"
 #include "theseus/penalties.h"
+#include "theseus/heuristics.h"
 #include "theseus/theseus_aligner.h"
 
-#include <vector>
 
 // Control of the output.
 #define AVOID_DP 0
 #define AVOID_THESEUS 0
 #define PRINT_ALIGNMENTS 0
 
+using NodeId = theseus::Graph::NodeId;
+
 struct CMDArgs {
+    // Penalties
     int match = 0;
     int mismatch = 2;
     int gapo = 3;
     int gape = 1;
+    // Heuristics
+    bool density_drop = false;
+    bool lag_pruning  = false;
+    // I/O
     std::string graph_file;
     std::string sequences_and_positions_file;
     std::string output_file;
 };
 
 
+NodeId node_name_to_id(theseus::Graph &graph,
+                       const std::string &name,
+                       const std::string &dna_seq,
+                       std::unordered_map<std::string, NodeId> &name_to_id,
+                       std::unordered_map<NodeId, std::string> &node_names)
+{
+    auto seq_ptr = name_to_id.find(name);
+    // If the name is not found, add it
+    if (seq_ptr == name_to_id.end())
+    {
+        // Check that lengths are consistent
+        assert(name_to_id.size() == graph.nnodes());
+        // Add the new node to the graph
+        NodeId id = graph.add_node(dna_seq);
+        // Add the new name
+        name_to_id[name] = id;
+        node_names[id]   = name;
+        return id;
+    }
+
+    // Check consistency
+    assert(seq_ptr->second < graph.nnodes());
+    assert(name == node_names[seq_ptr->second]);
+    return seq_ptr->second; // Second is the value of the key-value pair
+}
+
+
+/**
+ * @brief Return the reverse complement of a DNA string.
+ *
+ * @param dna_string The DNA string to reverse complement.
+ * @return std::string The reverse complement of the input DNA string.
+ */
+std::string reverse_complement(const std::string &dna_string) {
+    std::string rev_comp = dna_string;
+    std::reverse(rev_comp.begin(), rev_comp.end()); 	// Reverse the DNA string
+    for (char &c : rev_comp) {							// Complement the DNA string
+        switch (c) {
+            case 'A': case 'a': c = 'T'; break;
+            case 'T': case 't': c = 'A'; break;
+            case 'C': case 'c': c = 'G'; break;
+            case 'G': case 'g': c = 'C'; break;
+        }
+    }
+    return rev_comp;
+}
+
+
+// Construct a graph object from a  GFA file stream
+void graph_from_gfa_stream(std::istream &gfa_stream,
+                                     theseus::Graph &graph,
+                                     std::unordered_map<std::string, NodeId> &name_to_id,
+                                     std::unordered_map<NodeId, std::string> &node_names) {
+    std::string line;
+    while (gfa_stream.good()) {
+        std::getline(gfa_stream, line);
+        if (line.size() == 0 && !gfa_stream.good())
+            break;
+
+        // Only Segments and Links are supported
+        if (line.size() == 0 || (line[0] != 'S' && line[0] != 'L'))
+            continue;
+
+        // Parse segment data
+        if (line[0] == 'S')
+        {
+            std::stringstream sstr{line};
+            std::string type, name, dna_seq;
+            sstr >> type;
+            assert(type == "S");
+            sstr >> name >> dna_seq;
+            // Consider first the forward orientation
+            name = name + "+";
+            NodeId id = node_name_to_id(graph, name, dna_seq, name_to_id, node_names);
+            // Warning on empty nodes
+            if (dna_seq == "*")
+                std::cerr << std::string{"Nodes without sequence (*) are not currently supported (nodeid " + std::to_string(id) + ")"};
+            assert(dna_seq.size() >= 1);
+            // We add the reverse orientation
+            std::string rev_name = name.substr(0, name.size() - 1) + "-";
+            std::string rev_dna_seq = reverse_complement(dna_seq);
+            NodeId rev_id = node_name_to_id(graph, rev_name, rev_dna_seq, name_to_id, node_names);
+        }
+        // Parse link data. We add both edges (fromstr+fromstart, tostr+toend)
+        // and (tostr+toend, fromstr+fromstart), to support bidirectedness
+        if (line[0] == 'L')
+        {
+            std::stringstream sstr{line};
+            std::string type, fromstr_forward, tostr_forward, fromstr_reverse, tostr_reverse, fromstart, toend, overlapstr;
+            int overlap = 0;
+            sstr >> type;
+            sstr >> fromstr_forward >> fromstart >> tostr_forward >> toend >> overlapstr;
+            // Assess if the read data is consistent with the format
+            assert(type == "L");
+            assert(fromstart == "+" || fromstart == "-");
+            assert(toend == "+" || toend == "-");
+            // Set name ids
+            fromstr_forward = fromstr_forward + fromstart;
+            tostr_forward   = tostr_forward + toend;
+            fromstr_reverse = fromstr_forward.substr(0, fromstr_forward.size() - 1) + (fromstart == "+" ? "-" : "+");
+            tostr_reverse   = tostr_forward.substr(0, tostr_forward.size() - 1) + (toend == "+" ? "-" : "+");
+            // Get the node ids for the forward and reverse orientations of the edge
+            NodeId from_forward = node_name_to_id(graph, fromstr_forward, "", name_to_id, node_names);
+            NodeId to_forward   = node_name_to_id(graph, tostr_forward  , "", name_to_id, node_names);
+            NodeId from_reverse = node_name_to_id(graph, fromstr_reverse, "", name_to_id, node_names);
+            NodeId to_reverse   = node_name_to_id(graph, tostr_reverse  , "", name_to_id, node_names);
+            // Check overlap (currently only accept 0M)
+            if (overlapstr != "0M") {
+                std::cerr << "Currently, only edge overlaps of 0M are supported (non supported overlap: " + overlapstr + ")" << std::endl;
+            }
+            // Store the edges
+            // Forward edge
+            int frompos = (int)from_forward;
+            int topos   = (int)to_forward;
+            graph.add_edge(from_forward, to_forward);
+            // Reverse edge
+            frompos = (int)to_reverse;
+            topos   = (int)from_reverse;
+            graph.add_edge(to_reverse, from_reverse);
+        }
+    }
+    // Check that nodes are not empty
+    for (NodeId id : graph.nodes())
+    {
+        auto node = graph.node(id);
+        if (node.sequence.size() > 0)
+            continue;
+        std::string name = node_names[id];
+        if (name.back() == '+') {
+            std::cerr << std::string{"Node " + name + " is present in edges but missing in nodes"} << std::endl;
+        }
+    }
+    // Validate that all edges connect existing nodes TODO:
+}
+
+// // Constructor from handle graph
+// Graph::Graph(const handlegraph::HandleGraph &handle_graph) {
+//     // Add nodes
+//     handle_graph.for_each_handle([&](const handlegraph::handle_t& h) {
+//         // Forward orientation
+//         vertex v;
+//         v.name = std::to_string(handle_graph.get_id(h)); // Use the handle id as the name of the vertex
+//         v.value = handle_graph.get_sequence(h);
+//         _vertices.push_back(v);
+
+//         // Reverse orientation
+//         const handlegraph::handle_t& h_rev = handle_graph.flip(h);
+//         v.name = std::to_string(handle_graph.get_id(h_rev));
+//         v.value = handle_graph.get_sequence(h_rev);
+//         _vertices.push_back(v);
+//     });
+
+//     // Create name to id mapping
+//     for (int i = 0; i < _vertices.size(); ++i) {
+//         name_to_id_[_vertices[i].name] = i;
+//     }
+
+//     // Add edges
+//     handle_graph.for_each_edge([&](const handlegraph::edge_t& e) {
+//         // Forward orientation
+//         edge edge_fwd;
+//         std::string from_handle_name = std::to_string(handle_graph.get_id(e.first));
+//         std::string to_handle_name   = std::to_string(handle_graph.get_id(e.second));
+//         int from_vertex_id = name_to_id_.at(from_handle_name);
+//         int to_vertex_id   = name_to_id_.at(to_handle_name);
+//         // Check that the vertices exist in the graph
+//         if (from_vertex_id == -1 || to_vertex_id == -1) {
+//             std::cerr << "Error: Vertex not found in the graph for edge (" << from_handle_name << " -> " << to_handle_name << ")" << std::endl;
+//             return;
+//         }
+//         edge_fwd.from_vertex = from_vertex_id;
+//         edge_fwd.to_vertex   = to_vertex_id;
+//         edge_fwd.overlap     = 0; // TODO: Now we suppose that overlap is 0
+//         _vertices[edge_fwd.from_vertex].out_edges.push_back(edge_fwd);
+//         _vertices[edge_fwd.to_vertex].in_edges.push_back(edge_fwd);
+
+//         // Reverse orientation
+//         edge edge_rev;
+//         std::string rev_from_handle_name = std::to_string(handle_graph.get_id(handle_graph.flip(e.second)));
+//         std::string rev_to_handle_name   = std::to_string(handle_graph.get_id(handle_graph.flip(e.first)));
+//         int rev_from_vertex_id = name_to_id_.at(rev_from_handle_name);
+//         int rev_to_vertex_id   = name_to_id_.at(rev_to_handle_name);
+//         // Check that the vertices exist in the graph
+//         if (rev_from_vertex_id == -1 || rev_to_vertex_id == -1) {
+//             std::cerr << "Error: Vertex not found in the graph for reverse edge (" << rev_from_handle_name << " -> " << rev_to_handle_name << ")" << std::endl;
+//             return;
+//         }
+//         edge_rev.from_vertex = rev_from_vertex_id;
+//         edge_rev.to_vertex   = rev_to_vertex_id;
+//         edge_rev.overlap     = 0; // TODO: Now we suppose that overlap is 0
+//         _vertices[edge_rev.from_vertex].out_edges.push_back(edge_rev);
+//         _vertices[edge_rev.to_vertex].in_edges.push_back(edge_rev);
+//     });
+// }
+
+
 // Read sequence data
 void read_seq_pos_data(
     std::ifstream &sp_file,
     std::vector<std::string> &sequences,
-    std::vector<std::string> &start_vertices,
-    std::vector<int> &start_offsets)
+    std::vector<NodeId> &start_nodes,
+    std::vector<int> &start_offsets,
+    std::unordered_map<std::string, NodeId> &name_to_id)
 {
     if (!sp_file.is_open()) {
         std::cerr << "Could not open dataset file\n";
@@ -97,7 +307,8 @@ void read_seq_pos_data(
             }
 
             vertex = vertex + orientation; // We store the orientation in the vertex name);
-            start_vertices.push_back(vertex);
+            NodeId node_id = name_to_id[vertex];
+            start_nodes.push_back(node_id);
             start_offsets.push_back(offset);
 
             // Store previous sequence if any
@@ -125,15 +336,22 @@ void read_seq_pos_data(
  * @brief Print the help message.
  */
 void help() {
-    std::cout << "Usage: benchmark [OPTIONS]\n"
+    std::cout << "Usage: theseus_aligner [OPTIONS]\n"
                  "Options:\n"
-                 "  -m, --match <int>            The match penalty                                [default=0]\n"
-                 "  -x, --mismatch <int>         The mismatch penalty                             [default=2]\n"
-                 "  -o, --gapo <int>             The gap open penalty                             [default=3]\n"
-                 "  -e, --gape <int>             The gap extension penalty                        [default=1]\n"
-                 "  -g, --graph_file <file>      Graph file in .gfa format                        [Required]\n"
-                 "  -s, --sequences_file <file>  Sequences and starting positons in .fasta format [Required]\n"
-                 "  -f, --output_file <file>     Output file                                      [Required]\n";
+                 "  Penalties:\n"
+                 "  -m, --match <int>            The match penalty                                       [default=0]\n"
+                 "  -x, --mismatch <int>         The mismatch penalty                                    [default=2]\n"
+                 "  -o, --gapo <int>             The gap open penalty                                    [default=3]\n"
+                 "  -e, --gape <int>             The gap extension penalty                               [default=1]\n\n"
+
+                 "  I/O:\n"
+                 "  -g, --graph_file <file>      Graph file in .gfa format                               [Required]\n"
+                 "  -s, --sequences_file <file>  Sequences and starting positons in .fasta format        [Required]\n"
+                 "  -f, --output_file <file>     Output file                                             [Required]\n\n"
+
+                 " Heuristics:\n"
+                 "  -d  --density_heuristic     Activate the drop heuristic based on advancement density.            \n"
+                 "  -l  --lag_pruning           Activate the pruning of diagonals lagging behind int the alignment.  \n";
 }
 
 CMDArgs parse_args(int argc, char *const *argv) {
@@ -144,13 +362,15 @@ CMDArgs parse_args(int argc, char *const *argv) {
                                           {"graph_file", required_argument, 0, 'g'},
                                           {"sequences_file", required_argument, 0, 's'},
                                           {"output_file", required_argument, 0, 'f'},
+                                          {"lag_pruning", no_argument, 0, 'l'},
+                                          {"density_heuristic", no_argument, 0, 'd'},
                                           {0, 0, 0, 0}};
 
     CMDArgs args;
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "m:x:o:e:g:s:f:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "m:x:o:e:g:s:f:ld", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'm':
                 args.match = std::stoi(optarg);
@@ -173,6 +393,12 @@ CMDArgs parse_args(int argc, char *const *argv) {
             case 'f':
                 args.output_file = optarg;
                 break;
+            case 'l':
+                args.lag_pruning = true;
+                break;
+            case 'd':
+                args.density_drop = true;
+                break;
             default:
                 std::cerr << "Invalid option" << std::endl;
                 exit(1);
@@ -193,21 +419,27 @@ int main(int argc, char *const *argv) {
         return 1;
     }
 
+    // Parse penalties
     theseus::Penalties penalties(args.match, args.mismatch, args.gapo, args.gape);
-
+    // Parse heuristics
+    theseus::Heuristics heuristics(args.density_drop, args.lag_pruning);
     // Manage input/output files
     std::ifstream graph_file(args.graph_file);
     std::ifstream sp_file(args.sequences_and_positions_file);
     std::ofstream output_file(args.output_file);
-
+    // Construct the graph
+    theseus::Graph graph;
+    std::unordered_map<std::string, NodeId> name_to_id;
+    std::unordered_map<NodeId, std::string> node_names;
+    graph_from_gfa_stream(graph_file, graph, name_to_id, node_names);
+    std::cout << "Hola" << std::endl;
     // Prepare the aligner
-    theseus::TheseusAligner aligner(penalties, graph_file);
-
+    theseus::TheseusAligner aligner(penalties, heuristics, std::move(graph));
     // Read queries data
-    std::vector<std::string> sequences, start_vertices;
+    std::vector<std::string> sequences;
+    std::vector<NodeId> start_nodes;
     std::vector<int> start_offsets;
-    read_seq_pos_data(sp_file, sequences, start_vertices, start_offsets);
-
+    read_seq_pos_data(sp_file, sequences, start_nodes, start_offsets, name_to_id);
     // Align the sequences
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     int num_sequences = sequences.size();
@@ -215,17 +447,15 @@ int main(int argc, char *const *argv) {
     for (int i = 0; i < num_sequences; ++i) {
         // Perform alignment
         std::cout << "Seq " << i << std::endl;
-        alignment = aligner.align(sequences[i], start_vertices[i], start_offsets[i]);
-        aligner.print_alignment_as_gaf(alignment, output_file, "seq_" + std::to_string(i));
+        alignment = aligner.align(sequences[i], start_nodes[i], start_offsets[i]);
+        aligner.print_alignment_as_gaf(alignment, output_file, "seq_" + std::to_string(i), node_names);
     }
-
     // End time measurement
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     std::cout << "Elapsed time: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << " microseconds" << std::endl;
-
     // Close files
     graph_file.close();
     sp_file.close();
-
+    output_file.close();
     return 0;
 }

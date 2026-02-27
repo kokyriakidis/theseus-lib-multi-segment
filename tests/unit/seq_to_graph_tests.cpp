@@ -33,26 +33,29 @@
 #include <string>
 #include <sstream>
 #include <fstream>
-#include "../../theseus/graph.h"
+#include "../../include/theseus/graph.h"
 #include "../../include/theseus/alignment.h"
 #include "../../include/theseus/penalties.h"
 #include "../../include/theseus/theseus_aligner.h"
 
 
+using NodeId = theseus::Graph::NodeId;
+
 TEST_CASE("Check sequence-to-graph aligner") {
     SUBCASE("Correct alignment of sequences against a graph with a cycle") {
         // Reference graph
-        std::istringstream gfa_stream(
-            "S\t1\tACTTAG\n"
-            "S\t2\tACA\n"
-            "S\t3\tT\n"
-            "S\t4\tGTACTT\n"
-            "L\t1\t+\t2\t+\t0M\n"
-            "L\t1\t+\t3\t+\t0M\n"
-            "L\t2\t+\t4\t+\t0M\n"
-            "L\t3\t+\t4\t+\t0M\n"
-            "L\t4\t+\t1\t+\t0M\n"
-        );
+        theseus::Graph G;
+        // Add nodes
+        NodeId n1 = G.add_node("ACTTAG");
+        NodeId n2 = G.add_node("ACA");
+        NodeId n3 = G.add_node("T");
+        NodeId n4 = G.add_node("GTACTT");
+        // Add edges
+        G.add_edge(n1, n2);
+        G.add_edge(n1, n3);
+        G.add_edge(n2, n4);
+        G.add_edge(n3, n4);
+        G.add_edge(n4, n1);
 
         // Sequences for alignment
         std::vector<std::string> sequences = {
@@ -65,7 +68,7 @@ TEST_CASE("Check sequence-to-graph aligner") {
 
         // Starting offsets and vertices
         std::vector<int> start_offsets = {3, 3, 0, 0, 0};
-        std::vector<std::string> start_vertices = {"1", "1", "2", "2", "2"};
+        std::vector<NodeId> start_vertices = {n1, n1, n2, n2, n2};
 
         // Expected CIGARs
         std::vector<std::vector<char>> expected_cigars = {
@@ -76,21 +79,22 @@ TEST_CASE("Check sequence-to-graph aligner") {
             {'M','M','M','M','M','M','I','M','M','M','M','M'}
         };
 
-        // Expected paths TODO: Should have names of vertices instead of internal indices
-        std::vector<std::vector<int>> expected_paths = {
-            {0, 1, 3},
-            {0, 1, 3},
-            {1, 3, 0},
-            {1, 3, 0},
-            {1, 3, 0},
+        // Expected paths
+        std::vector<std::vector<NodeId>> expected_paths = {
+            {n1, n2, n4},
+            {n1, n2, n4},
+            {n2, n4, n1},
+            {n2, n4, n1},
+            {n2, n4, n1}
         };
 
         // Expected scores
         std::vector<int> expected_scores = {0, 2, 0, 4, 4};
 
         // Set aligner's parameters
-        theseus::Penalties penalties(0, 2, 3, 1);            // Create penalties object
-        theseus::TheseusAligner aligner(penalties, gfa_stream); // Create aligner
+        theseus::Penalties penalties(0, 2, 3, 1);                            // Create penalties object
+        theseus::Heuristics heuristics(false, false);                        // Create heuristics object
+        theseus::TheseusAligner aligner(penalties, heuristics, std::move(G));       // Create aligner
 
         // Align sequences and check results
         for (int i = 0; i < start_offsets.size(); ++i) {
@@ -98,7 +102,6 @@ TEST_CASE("Check sequence-to-graph aligner") {
                 sequences[i], start_vertices[i], start_offsets[i]
             );
 
-            // Check if alignment was successful
             CHECK(alignment.compute_affine_gap_score(penalties) == expected_scores[i]); // Check score
             CHECK(alignment.edit_op == expected_cigars[i]);        // Check CIGAR
             CHECK(alignment.path == expected_paths[i]); // Check path

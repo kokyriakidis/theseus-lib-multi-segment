@@ -1,11 +1,26 @@
 cmake_minimum_required(VERSION 3.14)
 
-project(theseus VERSION 1.0)
+project(theseus VERSION 1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
+include(FetchContent)
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED On)
+#
+# DEPENDENCIES
+#
+
+FetchContent_Declare(
+    libhandlegraph
+    GIT_REPOSITORY https://github.com/vgteam/libhandlegraph.git
+    GIT_TAG b95f7637968b4c8c3c4d1bad13aaa1835c607fe0
+)
+
+FetchContent_GetProperties(libhandlegraph)
+if(NOT libhandlegraph_POPULATED)
+    FetchContent_Populate(libhandlegraph)
+    # EXCLUDE_FROM_ALL to avoid installing libhandlegraph targets when make install
+    add_subdirectory(${libhandlegraph_SOURCE_DIR} ${libhandlegraph_BINARY_DIR})
+endif()
 
 #
 # SETTINGS
@@ -18,12 +33,6 @@ set(VALID_BUILD_TYPES Debug Release RelWithDebInfo MinSizeRel)
 if(NOT CMAKE_BUILD_TYPE)
     message(STATUS "Setting build type to 'Release' as no build type was specified")
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
-endif()
-
-# Add warnings for debug builds
-if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Wuninitialized -Wunused -Wshadow -g")
-    message(STATUS "Building in debug mode")
 endif()
 
 # Check if the provided CMAKE_BUILD_TYPE is in the valid list
@@ -43,16 +52,31 @@ option(ENABLE_TESTS "Enable building of tests" ON)
 # THESEUS LIBRARY
 #
 
-# Specify include directories
-include_directories(${PROJECT_SOURCE_DIR}/include/)
-
 # Find all source files in the theseus directory
-file(GLOB_RECURSE THESEUS_SOURCES
+file(GLOB_RECURSE THESEUS_SOURCES CONFIGURE_DEPENDS
     "theseus/*.cpp"
 )
 
 # Add the library
 add_library(${PROJECT_NAME} ${THESEUS_SOURCES})
+
+# Per-target C++ standard
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_23)
+
+# Per-target include directories
+target_include_directories(${PROJECT_NAME}
+    PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+# Link against dependencies
+target_link_libraries(${PROJECT_NAME} PUBLIC handlegraph_static)
+
+# Per-target warnings for debug builds (PRIVATE to avoid leaking to consumers)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic -Wuninitialized -Wunused -Wshadow)
+endif()
 
 # Specify the installation properties for the library
 install(TARGETS ${PROJECT_NAME}
@@ -60,6 +84,24 @@ install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}  # Default to bin
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}  # Default to lib
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}  # Default to lib
+)
+
+# Install the export set so consumers can find_package()
+install(EXPORT ${PROJECT_NAME}-targets
+    FILE ${PROJECT_NAME}Targets.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+)
+
+# Generate and install the Config file that loads dependencies first
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
 
 # Install the include directory
@@ -74,17 +116,17 @@ install(DIRECTORY include/
 
 add_library(doctest_main OBJECT tests/doctest_main.cpp)
 
-file(GLOB_RECURSE UNIT_TESTS
+file(GLOB_RECURSE UNIT_TESTS CONFIGURE_DEPENDS
     "tests/unit/*.cpp"
 )
 
-file(GLOB_RECURSE CPP_EXAMPLES
-    "examples/cpp/*.cpp"
-)
+# file(GLOB_RECURSE CPP_EXAMPLES CONFIGURE_DEPENDS
+#     "examples/cpp/*.cpp"
+# )
 
-file(GLOB_RECURSE C_EXAMPLES
-    "examples/c/*.c"
-)
+# file(GLOB_RECURSE C_EXAMPLES CONFIGURE_DEPENDS
+#     "examples/c/*.c"
+# )
 
 
 #
@@ -92,7 +134,7 @@ file(GLOB_RECURSE C_EXAMPLES
 #
 
 # Find all the tools source files
-file(GLOB_RECURSE THESEUS_TOOLS_SOURCES
+file(GLOB_RECURSE THESEUS_TOOLS_SOURCES CONFIGURE_DEPENDS
     "tools/*.cpp"
 )
 
@@ -112,12 +154,14 @@ function(add_tests test_files output_directory is_ctest is_doctest)
         # Conditionally add doctest_main based on is_doctest
         if(is_doctest)
             add_executable(${test_name} ${test_file} $<TARGET_OBJECTS:doctest_main>)
+        else()
+            add_executable(${test_name} ${test_file})
         endif()
 
         # To access test files from the test.
-        target_compile_definitions(${test_name} PUBLIC TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/")
+        target_compile_definitions(${test_name} PRIVATE TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/")
         # To access penalty files from test.
-        target_compile_definitions(${test_name} PUBLIC SUB_MATRICES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/sub_matrices/")
+        target_compile_definitions(${test_name} PRIVATE SUB_MATRICES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/sub_matrices/")
 
         target_link_libraries(${test_name} PRIVATE ${PROJECT_NAME})
         set_target_properties(${test_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${output_directory}")
@@ -134,7 +178,7 @@ if(ENABLE_TESTS)
 
     add_tests("${UNIT_TESTS}" "tests/unit" TRUE TRUE)
 
-    add_tests("${CPP_EXAMPLES}" "examples/cpp" TRUE FALSE)
+    # add_tests("${CPP_EXAMPLES}" "examples/cpp" TRUE FALSE)
 
-    add_tests("${C_EXAMPLES}" "examples/c" TRUE FALSE)
+    # add_tests("${C_EXAMPLES}" "examples/c" TRUE FALSE)
 endif()

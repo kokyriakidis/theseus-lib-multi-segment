@@ -30,9 +30,12 @@
 
 #include <memory>
 #include <istream>
+#include <unordered_map>
 
 #include "theseus/penalties.h"
 #include "theseus/alignment.h"
+#include "theseus/heuristics.h"
+#include "theseus/graph.h"
 
 /**
  * Multiple Sequence Aligner (MSA) based on POA graphs. Internally uses the
@@ -51,10 +54,14 @@ namespace theseus
         /**
          * Initial constructor
          *
-         * @param penalties User defined alignment penalties
-         * @param seq Sequence to initialize the graph
+         * @param penalties  User defined alignment penalties
+         * @param heuristics User defined heuristics
+         * @param seq        Sequence to initialize the graph
          */
-        TheseusMSA(const Penalties &penalties, std::string_view seq);
+        TheseusMSA(
+            const Penalties &penalties,
+            const Heuristics &heuristics,
+            std::string_view seq);
 
         /**
          * Class destructor
@@ -65,12 +72,10 @@ namespace theseus
         /**
          * Add a new sequence to the POA graph, representing the MSA so far.
          *
-         * @param seq
-         * @param start_node
-         * @param start_offset
-         * @return Alignment
+         * @param seq Sequence to add to the MSA
          */
-        Alignment align(std::string_view seq);
+        Alignment align(std::string_view seq,
+                        bool reverse_alignment = false);
 
         /**
          * @brief Print the current POA graph as a GFA file.

@@ -8,7 +8,10 @@
 * [Using Theseus](#using_theseus)
     * [Multiple Sequence Alignment (MSA)](#msa_usage)
     * [Aligning a sequence to a graph](#alignment_usage)
+    * [Creating a graph](#graph_creation)
 * [Tools](#theseus_tools)
+* [Heuristics](#theseus_heuristics)
+* [Datasets](#theseus_datasets)
 * [Reporting Bugs and Feature Request](#theseus_bugs)
 * [License](#theseus_licence)
 * [Authors](#theseus_authors)
@@ -45,28 +48,31 @@ make
 This example illustrates how to use Theseus as a Multiple Sequence Aligner. First, include the msa and general headers:
 ```
 #include "theseus/alignment.h"
+#include "theseus/heuristics.h"
 #include "theseus/penalties.h"
 #include "theseus/theseus_msa_aligner.h"
 ```
 
-Then, create and configure a MSA aligner object. This object is defined by two parameters: a set of penalties and an initial sequence behaving as the starting point of the alignment. An example on how to set such parameters and create an MSA object is found in the next code snippet:
+Then, create and configure a MSA aligner object. This object is defined by three parameters: a set of penalties, a heuristics object, and an initial sequence behaving as the starting point of the alignment. An example on how to set such parameters and create an MSA object is found in the next code snippet:
 ```
 theseus::Penalties penalties(match, mismatch, gap_open, gap_extend);
-theseus::TheseusMSA aligner(penalties, initial_sequence);
+theseus::Heuristics heuristics(use_lag_pruning, use_density_drop);
+theseus::TheseusMSA aligner(penalties, heuristics, initial_sequence);
 ```
 
-Once this is done, we can start adding sequences to our POA graph using the align functionality, that returns an Alignment object with CIGAR, path and score information:
+Once this is done, we can start adding sequences to our POA graph using the align functionality, that returns an Alignment object with CIGAR, path, and score information:
 ```
 theseus::Alignment alignment_object = aligner.align(sequence);
 ```
 
 Each time a new sequence is added to the POA graph, the graph is updated with the newly found variation (all the insertions, deletions and mismatches of the resulting alignment object).
 
-Finally, we can output the result in three different formats: a graph in .gfa format, a multiple sequence alignment and a consensus sequence:
+Finally, we can output the result in four different formats: a graph in .gfa format, a multiple sequence alignment, a consensus sequence, and a graph in .dot format:
 ```
-aligner.output_as_gfa(output_file);             // Output the compacted POA graph in .gfa format
-aligner.output_as_msa(output_file);             // Output as a Multiple Sequence Alignment
-sequence = aligner.get_consensus_sequence();    // Find the consensus sequence of the alignment
+aligner.print_as_gfa(output_file);             // Output the compacted POA graph in .gfa format
+aligner.print_as_msa(output_file);             // Output as a Multiple Sequence Alignment
+sequence = aligner.get_consensus_sequence();   // Find the consensus sequence of the alignment
+aligner.print_as_dot(output_file);             // Output the compacted POA graph in .dot format
 ```
 
 
@@ -75,19 +81,44 @@ sequence = aligner.get_consensus_sequence();    // Find the consensus sequence o
 This example illustrates how to use Theseus as a general Sequence-to-Graph Aligner. First, include the alignment and general headers:
 ```
 #include "theseus/alignment.h"
+#include "theseus/graph.h"
 #include "theseus/penalties.h"
+#include "theseus/heuristics.h"
 #include "theseus/theseus_aligner.h"
 ```
 
-Then, create and configure an aligner object. This object is defined by two parameters: a set of penalties and file stream containing a reference graph in .gfa format. An example on how to set such parameters and create an aligner is found in the next code snippet:
+Then, create and configure an aligner object. This object is defined by three parameters: a set of penalties, a heuristics object, and a reference graph in Theseus' internal graph format. An example on how to set such parameters and create an aligner is found in the next code snippet:
 ```
 theseus::Penalties penalties(match, mismatch, gap_open, gap_extend);
-theseus::TheseusAligner aligner(penalties, gfa_file_stream);
+theseus::Heuristics heuristics(use_lag_pruning, use_density_drop);
+theseus::TheseusAligner aligner(penalties, heuristics, std::move(graph));
 ```
 
-Once this is done, we can start aligning sequences to the reference graph using the align functionality. **Importantly**, a call to the align function consists of three arguments: the **sequence** to be aligned, the **starting vertex** for the alignment and **starting offset** in that starting vertex. The result of the alignment is an Alignment object with CIGAR, path and score information:
+Once this is done, we can start aligning sequences to the reference graph using the align functionality. **Importantly**, a call to the align function consists of four arguments: the **sequence** to be aligned, the **starting vertex** for the alignment, the **starting offset** in that starting vertex, and a boolean variable indicating the **direction of alignment**. The result of the alignment is an Alignment object with CIGAR, path and score information:
 ```
-theseus::Alignment alignment_object = aligner.align(sequence, start_vertex, start_offset);
+theseus::Alignment alignment_object = aligner.align(sequence, start_vertex, start_offset, align_reverse);
+```
+
+### <a name="graph_creation"></a> 2.3. Creating a graph
+
+The Theseus' library, allows you to create your own reference graphs to perform sequence-to-graph alignment. A graph is composed of two key elements: nodes and edges. Nodes store genomics' data in the form of a sequence of characters, and edges represent connections between these existing nodes. If you want to create a graph, you first have to include the "theseus/graph.h" header file:
+```
+#include "theseus/graph.h"
+```
+
+Then, you have to assign it a name upon creation:
+```
+theseus::Graph graph;
+```
+
+You can add nodes using the "add_node(string)" functionality, that always returns a node identifier (NodeId) that will be necessary to create edges. For instance, if you want to create a node storing the sequence "ACTTAG", you should:
+```
+theseus::Graph::NodeId id_node1 = graph.add_node("ACTTAG");
+```
+
+Now, if you want to create an edge connecting two existing nodes, you have to provide the two node ids and use the "add_edge(id_node1, id_node2)" functionality:
+```
+graph.add_edge(id_node1, id_node2);
 ```
 
 
@@ -104,19 +135,24 @@ cd build/tools/
 
 Select the scoring scheme, set the input and output files and execute the tool. Each execution of *theseus_msa* lets you select the following parameters:
 ```
-Options:
-  -m, --match <int>           The match penalty                           [default=0]
-  -x, --mismatch <int>        The mismatch penalty                        [default=2]
-  -o, --gapo <int>            The gap open penalty                        [default=3]
-  -e, --gape <int>            The gap extension penalty                   [default=1]
-  -t, --output_type <int>     The output format of the multiple alignment [default=0=MSA]
-      0: MSA: Standard Multiple Sequence Alignment format,
-      1: GFA: Output the resulting POA graph in GFA format,
-      2: Consensus: Output the consensus sequence,
-      3: Dot: Output in .dot format for visualization purposes.
-              Only tractable for small graphs
-  -f, --output <file>         Output file                                 [Required]
-  -s, --sequences <file>      Dataset file                                [Required]
+Usage: theseus_msa [OPTIONS]
+                 Options:\n"
+                   -m, --match <int>           The match penalty                                       [default=0]
+                   -x, --mismatch <int>        The mismatch penalty                                    [default=2]
+                   -o, --gapo <int>            The gap open penalty                                    [default=3]
+                   -e, --gape <int>            The gap extension penalty                               [default=1]
+                   -t, --output_type <int>     The output format of the multiple alignment             [default=0=MSA]
+                                                0: MSA: Standard Multiple Sequence Alignment format,
+                                                1: GFA: Output the resulting POA graph in GFA format,
+                                                2: Consensus: Output the consensus sequence,
+                                                3: Dot: Output in .dot format for visualization purposes.
+                                                        Only tractable for small graphs
+                   -f, --output <file>         Output file                                             [Required]
+                   -s, --sequences <file>      Dataset file                                            [Required]"
+
+                  Heuristics:\n"
+                   -d  --density_heuristic     Activate the drop heuristic based on advancement density.
+                   -l  --lag_pruning           Activate the pruning of diagonals lagging behind in the alignment.
 ```
 
 An example of the execution of *theseus_msa* is shown in the following piece of code
@@ -131,12 +167,12 @@ This example illustrates how to use the **theseus_aligner** tool. This tool alig
 **[IMPORTANT]**
 The *.fasta* file containing sequence and positional data has a special structure. As all .fasta files, the data associated to each sequence has two parts: 1) A line starting with ">" containing metadata, and 2) the sequence itself, that appears on the next lines.
 
-1) Constists of three elements: *start_vertex* name, *start_offset* and orientation of the alignment. The orientation of the alignment can either be "+" or "-" and it indicates Theseus whether to align from the forward or reverse strand of the given start node. *[IMPORTANT]*, the *start_offset* value is respect the starting node in the given alignment orientation. That is, if alignment orientation is reverse ("-") and the offset is 0, alignment starts at the beggining of the reverse complemented segment.
+1) Constists of four elements: *start_vertex* name, *start_offset*, orientation of the alignment, and direction of alignment. The orientation of the alignment can either be "+" or "-" and it indicates Theseus whether to align from the forward or reverse strand of the given start node. The direction of alignment has to be 0 or 1 and it indicates in which direction (left to right or right to left) do you want to perform your alignment. *[IMPORTANT]*, the *start_offset* value is respect the starting node in the given alignment orientation. That is, if alignment orientation is reverse ("-") and the offset is 0, alignment starts at the beggining of the reverse complemented segment.
 2) Contains the sequence itself.
 
-For instance, a sequence ACGT starting at vertex *v1*, offset *3* and in the forward orientation *+* would be codified as:
+For instance, a sequence ACGT starting at vertex *v1*, offset *3*, in the forward orientation *+*, and aligned from left to right would be codified as:
 ```
-> v1 3 +
+> v1 3 + 0
 ACGT
 > ... (following lines)
 ```
@@ -148,14 +184,22 @@ cd build/tools/
 
 Select the scoring scheme, set the input and output files and execute the tool. Each execution of *theseus_aligner* lets you select the following parameters:
 ```
-Options:
-  -m, --match <int>            The match penalty                                  [default=0]
-  -x, --mismatch <int>         The mismatch penalty                               [default=2]
-  -o, --gapo <int>             The gap open penalty                               [default=3]
-  -e, --gape <int>             The gap extension penalty                          [default=1]
-  -g, --graph_file <file>      Graph file in .gfa format                          [Required]
-  -s, --sequences_file <file>  Sequences and starting positons in .fasta format   [Required]
-  -f, --output_file <file>     Output file                                        [Required]
+"Usage: theseus_aligner [OPTIONS]\n"
+                 Options:\n"
+                   Penalties:\n"
+                   -m, --match <int>            The match penalty                                       [default=0]\n"
+                   -x, --mismatch <int>         The mismatch penalty                                    [default=2]\n"
+                   -o, --gapo <int>             The gap open penalty                                    [default=3]\n"
+                   -e, --gape <int>             The gap extension penalty                               [default=1]\n\n"
+
+                   I/O:\n"
+                   -g, --graph_file <file>      Graph file in .gfa format                               [Required]\n"
+                   -s, --sequences_file <file>  Sequences and starting positons in .fasta format        [Required]\n"
+                   -f, --output_file <file>     Output file                                             [Required]\n\n"
+
+                  Heuristics:\n"
+                   -d  --density_heuristic     Activate the drop heuristic based on advancement density.            \n"
+                   -l  --lag_pruning           Activate the pruning of diagonals lagging behind int the alignment.  \n";
 ```
 
 An example of the execution of *theseus_aligner* is shown in the following piece of code
@@ -163,12 +207,27 @@ An example of the execution of *theseus_aligner* is shown in the following piece
 ./theseus_aligner -m 0 -x 2 -o 3 -e 1 -g reference_graph.gfa -s sequences.fasta -f output.out
 ```
 
-## <a name="theseus_datasets"></a> 4. DATASETS
 
-The datasets used in our paper are available in Zenodo. <!-- falta posar els links
+## <a name="theseus_heuristics"></a> 4. HEURISTICS
+Theseus library implements some heuristic approaches that accelerate alignment at the expense of a limited loss in accuracy. In particular, Theseus implements 1) a **pruning heuristic** that discards diagonals that have fallen behind in the alignment, as long as the alignment has shown a significant advancement in the last scores, and 2) a **drop heuristic** that drops alignment when the advancement density (number of offsets advanced in the last scores) is very low.
+
+You can activate these heuristics by initializing the Heuristics object with two separate boolean flags:
+```
+theseus::Heuristics heuristics(use_lag_pruning, use_density_drop);
+```
+
+Moreover, the three minimal tools provided in this alignment library allow you to activate these two heuristics from the command line, by adding the **-d** and **-l** flags:
+```
+./theseus_aligner -m 0 -x 2 -o 3 -e 1 -g reference_graph.gfa -s sequences.fasta -f output.out -d -l
+```
 
 
-## <a name="theseus_bugs"></a> 5. REPORTING BUGS AND FEATURE REQUEST
+## <a name="theseus_datasets"></a> 5. DATASETS
+
+The datasets used in our paper are available in Zenodo. [Link to datasets](https://zenodo.org/records/18482097)
+
+
+## <a name="theseus_bugs"></a> 6. REPORTING BUGS AND FEATURE REQUEST
 
 Feedback and bug reporting is highly appreciated. Please report any issue or suggestion on github or email to the main developer (albert.jimenez1@bsc.es). Don't hesitate to contact us if:
   - You experience any bug or crash.
@@ -177,12 +236,12 @@ Feedback and bug reporting is highly appreciated. Please report any issue or sug
   - Need help integrating the library into your tool.
 
 
-## <a name="theseus_licence"></a> 6. LICENSE
+## <a name="theseus_licence"></a> 7. LICENSE
 
 Theseus-lib is distributed under MIT licence.
 
 
-## <a name="theseus_authors"></a> 7. AUTHORS
+## <a name="theseus_authors"></a> 8. AUTHORS
 
 Albert Jimenez Blanco (albert.jimenez1@bsc.es) is the main developer and the person you should address your complaints.
 

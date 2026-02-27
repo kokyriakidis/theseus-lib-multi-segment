@@ -55,7 +55,7 @@ public:
      * @param max_diag
      */
     ScratchPad(diag_type min_diag, diag_type max_diag) :
-        _wf(min_diag, max_diag, Cell{-1, -1, -1, -1, Cell::Matrix::None}) {
+        _wf(min_diag, max_diag, Cell{-1, 0, -1, -1, Cell::Matrix::None}) {
 
         _diags.realloc(_wf.size());
     }

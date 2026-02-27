@@ -30,9 +30,13 @@
 
 #include <memory>
 #include <istream>
+#include <unordered_map>
 
+#include "theseus/graph.h"
 #include "theseus/penalties.h"
 #include "theseus/alignment.h"
+#include "theseus/heuristics.h"
+
 
 /**
  * @file theseus_aligner.h
@@ -45,6 +49,7 @@
 
 namespace theseus
 {
+    using NodeId = Graph::NodeId;
 
     class TheseusAlignerImpl; // Forward declaration of the implementation class.
 
@@ -52,12 +57,30 @@ namespace theseus
     {
     public:
         /**
-         * Constructor
+         * Constructor from graph
          *
          * @param penalties User defined alignment penalties
-         * @param gfa_stream Input stream containing the graph in GFA format
+         * @param heuristics Heuristics object
+         * @param graph Reference graph in the internal graph format
          */
-        TheseusAligner(const Penalties &penalties, std::istream &gfa_stream);
+        TheseusAligner(
+            const Penalties &penalties,
+            const Heuristics &heuristics,
+            Graph &graph);
+
+        /**
+         * @brief Constructor from rvalued graph. This constructor is useful
+         * when the user has a graph that they no longer need after constructing
+         * the aligner.
+         *
+         * @param penalties User defined alignment penalties
+         * @param heuristics Heuristics object
+         * @param graph Rvalued graph in the internal graph format
+         */
+        TheseusAligner(
+            const Penalties &penalties,
+            const Heuristics &heuristics,
+            Graph &&graph);
 
         /**
          * Class destructor
@@ -74,7 +97,8 @@ namespace theseus
         void print_alignment_as_gaf(
                 theseus::Alignment &alignment,
                 std::ostream &out_stream,
-                std::string seq_name);
+                std::string seq_name,
+                std::unordered_map<NodeId, std::string> &node_names);
 
         /**
          * Main alignment function. Aligns the given sequence to the graph starting
@@ -86,8 +110,8 @@ namespace theseus
          * @return Alignment
          */
         Alignment align(std::string_view seq,
-                std::string &start_node,
-                int start_offset = 0);
+                        NodeId &start_node,
+                        int start_offset = 0);
 
     private:
         std::unique_ptr<TheseusAlignerImpl> aligner_impl_;
