@@ -33,6 +33,7 @@
 #include<iostream>
 #include<fstream>
 
+#include <handlegraph/handle_graph.hpp>
 #include"gfa_graph.h"
 
 /**
@@ -73,6 +74,13 @@ class Graph {
          * @param gfa_graph
          */
         Graph(std::istream &gfa_stream);
+
+        /**
+         * @brief Construct a new Graph object from a HandleGraph object.
+         *
+         * @param handle_graph
+         */
+        Graph(const handlegraph::HandleGraph &handle_graph);
 
         /**
          * @brief Visualize the graph in Graphviz format.

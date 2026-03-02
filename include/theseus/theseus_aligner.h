@@ -31,8 +31,11 @@
 #include <memory>
 #include <istream>
 
+#include <handlegraph/handle_graph.hpp>
+
 #include "theseus/penalties.h"
 #include "theseus/alignment.h"
+
 
 /**
  * @file theseus_aligner.h
@@ -67,8 +70,8 @@ namespace theseus
          *
          * @param penalties User defined alignment penalties
          * @param graph HandleGraph object representing the graph to be aligned to
-         */ //TODO:
-        // TheseusAligner(const Penalties &penalties, const handlegraph::HandleGraph &graph);
+         */
+        TheseusAligner(const Penalties &penalties, const handlegraph::HandleGraph &graph);
 
         /**
          * Class destructor

@@ -28,10 +28,12 @@
 
 #include <vector>
 #include <string>
+
 #include "graph.h"
 #include "gfa_graph.h"
 
 namespace theseus {
+    // Constructor from GFA stream
     Graph::Graph(std::istream &gfa_stream) {
         GfaGraph gfa_graph(gfa_stream);
 
@@ -58,5 +60,65 @@ namespace theseus {
         for (int i = 0; i < _vertices.size(); ++i) {
             name_to_id_[_vertices[i].name] = i;
         }
+    }
+
+    // Constructor from handle graph
+    Graph::Graph(const handlegraph::HandleGraph &handle_graph) {
+        // Add nodes
+        handle_graph.for_each_handle([&](const handlegraph::handle_t& h) {
+            // Forward orientation
+            vertex v;
+            v.name = std::to_string(handle_graph.get_id(h)); // Use the handle id as the name of the vertex
+            v.value = handle_graph.get_sequence(h);
+            _vertices.push_back(v);
+
+            // Reverse orientation
+            const handlegraph::handle_t& h_rev = handle_graph.flip(h);
+            v.name = std::to_string(handle_graph.get_id(h_rev));
+            v.value = handle_graph.get_sequence(h_rev);
+            _vertices.push_back(v);
+        });
+
+        // Create name to id mapping
+        for (int i = 0; i < _vertices.size(); ++i) {
+            name_to_id_[_vertices[i].name] = i;
+        }
+
+        // Add edges
+        handle_graph.for_each_edge([&](const handlegraph::edge_t& e) {
+            // Forward orientation
+            edge edge_fwd;
+            std::string from_handle_name = std::to_string(handle_graph.get_id(e.first));
+            std::string to_handle_name   = std::to_string(handle_graph.get_id(e.second));
+            int from_vertex_id = name_to_id_.at(from_handle_name);
+            int to_vertex_id   = name_to_id_.at(to_handle_name);
+            // Check that the vertices exist in the graph
+            if (from_vertex_id == -1 || to_vertex_id == -1) {
+                std::cerr << "Error: Vertex not found in the graph for edge (" << from_handle_name << " -> " << to_handle_name << ")" << std::endl;
+                return;
+            }
+            edge_fwd.from_vertex = from_vertex_id;
+            edge_fwd.to_vertex   = to_vertex_id;
+            edge_fwd.overlap     = 0; // TODO: Now we suppose that overlap is 0
+            _vertices[edge_fwd.from_vertex].out_edges.push_back(edge_fwd);
+            _vertices[edge_fwd.to_vertex].in_edges.push_back(edge_fwd);
+
+            // Reverse orientation
+            edge edge_rev;
+            std::string rev_from_handle_name = std::to_string(handle_graph.get_id(handle_graph.flip(e.second)));
+            std::string rev_to_handle_name   = std::to_string(handle_graph.get_id(handle_graph.flip(e.first)));
+            int rev_from_vertex_id = name_to_id_.at(rev_from_handle_name);
+            int rev_to_vertex_id   = name_to_id_.at(rev_to_handle_name);
+            // Check that the vertices exist in the graph
+            if (rev_from_vertex_id == -1 || rev_to_vertex_id == -1) {
+                std::cerr << "Error: Vertex not found in the graph for reverse edge (" << rev_from_handle_name << " -> " << rev_to_handle_name << ")" << std::endl;
+                return;
+            }
+            edge_rev.from_vertex = rev_from_vertex_id;
+            edge_rev.to_vertex   = rev_to_vertex_id;
+            edge_rev.overlap     = 0; // TODO: Now we suppose that overlap is 0
+            _vertices[edge_rev.from_vertex].out_edges.push_back(edge_rev);
+            _vertices[edge_rev.to_vertex].in_edges.push_back(edge_rev);
+        });
     }
 }

@@ -40,6 +40,13 @@ TheseusAligner::TheseusAligner(const Penalties &penalties,
     aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, std::move(graph), false);
 }
 
+TheseusAligner::TheseusAligner(const Penalties &penalties,
+                               const handlegraph::HandleGraph &handle_graph)
+{
+    Graph graph(handle_graph);
+    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, std::move(graph), false);
+}
+
 
 TheseusAligner::~TheseusAligner() {}
 
