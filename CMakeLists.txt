@@ -18,7 +18,8 @@ FetchContent_Declare(
 FetchContent_GetProperties(libhandlegraph)
 if(NOT libhandlegraph_POPULATED)
     FetchContent_Populate(libhandlegraph)
-    add_subdirectory(${libhandlegraph_SOURCE_DIR} ${libhandlegraph_BINARY_DIR} EXCLUDE_FROM_ALL)
+    # EXCLUDE_FROM_ALL to avoid installing libhandlegraph targets when make install
+    add_subdirectory(${libhandlegraph_SOURCE_DIR} ${libhandlegraph_BINARY_DIR})
 endif()
 
 #
@@ -158,9 +159,9 @@ function(add_tests test_files output_directory is_ctest is_doctest)
         endif()
 
         # To access test files from the test.
-        target_compile_definitions(${test_name} PUBLIC TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/")
+        target_compile_definitions(${test_name} PRIVATE TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/")
         # To access penalty files from test.
-        target_compile_definitions(${test_name} PUBLIC SUB_MATRICES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/sub_matrices/")
+        target_compile_definitions(${test_name} PRIVATE SUB_MATRICES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/sub_matrices/")
 
         target_link_libraries(${test_name} PRIVATE ${PROJECT_NAME})
         set_target_properties(${test_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${output_directory}")
