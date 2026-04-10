@@ -34,13 +34,14 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 
 #include "theseus/alignment.h"
 #include "theseus/penalties.h"
+#include "theseus/heuristics.h"
 #include "theseus/theseus_aligner.h"
 
-#include <vector>
 
 // Control of the output.
 #define AVOID_DP 0
@@ -48,10 +49,17 @@
 #define PRINT_ALIGNMENTS 0
 
 struct CMDArgs {
+    // Penalties
     int match = 0;
     int mismatch = 2;
     int gapo = 3;
     int gape = 1;
+    // Heuristics
+    int max_steps = -1;
+    int lag_threshold = -1;
+    int lag_density = -1;
+    double advancement_density = -1;
+    // I/O
     std::string graph_file;
     std::string sequences_and_positions_file;
     std::string output_file;
@@ -127,13 +135,22 @@ void read_seq_pos_data(
 void help() {
     std::cout << "Usage: benchmark [OPTIONS]\n"
                  "Options:\n"
+                 "  Penalties:\n"
                  "  -m, --match <int>            The match penalty                                [default=0]\n"
                  "  -x, --mismatch <int>         The mismatch penalty                             [default=2]\n"
                  "  -o, --gapo <int>             The gap open penalty                             [default=3]\n"
-                 "  -e, --gape <int>             The gap extension penalty                        [default=1]\n"
+                 "  -e, --gape <int>             The gap extension penalty                        [default=1]\n\n"
+
+                 "  I/O:\n"
                  "  -g, --graph_file <file>      Graph file in .gfa format                        [Required]\n"
                  "  -s, --sequences_file <file>  Sequences and starting positons in .fasta format [Required]\n"
-                 "  -f, --output_file <file>     Output file                                      [Required]\n";
+                 "  -f, --output_file <file>     Output file                                      [Required]\n\n"
+
+                 "  Heuristics:\n"
+                 "  -l  --lag_behind             Threshold value for the lag behind heuristic                 \n"
+                 "  -L  --lag_density            Threshold value for the lag density heuristic                \n"
+                 "  -p  --max_steps              Maximum number of steps for the Theseus algorithm            \n"
+                 "  -d  --advancement_density    Minimum advancement density to continue alignment (else drop)\n";
 }
 
 CMDArgs parse_args(int argc, char *const *argv) {
@@ -144,13 +161,17 @@ CMDArgs parse_args(int argc, char *const *argv) {
                                           {"graph_file", required_argument, 0, 'g'},
                                           {"sequences_file", required_argument, 0, 's'},
                                           {"output_file", required_argument, 0, 'f'},
+                                          {"lag_behind", required_argument, 0, 'l'},
+                                          {"lag_density", required_argument, 0, 'L'},
+                                          {"max_steps", required_argument, 0, 'p'},
+                                          {"advancement_density", required_argument, 0, 'd'},
                                           {0, 0, 0, 0}};
 
     CMDArgs args;
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "m:x:o:e:g:s:f:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "m:x:o:e:g:s:f:l:L:p:d", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'm':
                 args.match = std::stoi(optarg);
@@ -173,6 +194,18 @@ CMDArgs parse_args(int argc, char *const *argv) {
             case 'f':
                 args.output_file = optarg;
                 break;
+            case 'l':
+                args.lag_threshold = std::stoi(optarg);
+                break;
+            case 'L':
+                args.lag_density = std::stoi(optarg);
+                break;
+            case 'p':
+                args.max_steps = std::stoi(optarg);
+                break;
+            case 'd':
+                args.advancement_density = std::stoi(optarg);
+                break;
             default:
                 std::cerr << "Invalid option" << std::endl;
                 exit(1);
@@ -193,7 +226,11 @@ int main(int argc, char *const *argv) {
         return 1;
     }
 
+    // Parse penalties
     theseus::Penalties penalties(args.match, args.mismatch, args.gapo, args.gape);
+
+    // Parse heuristics
+    theseus::Heuristics heuristics(args.lag_threshold, args.lag_density, args.advancement_density, args.max_steps);
 
     // Manage input/output files
     std::ifstream graph_file(args.graph_file);
@@ -201,7 +238,7 @@ int main(int argc, char *const *argv) {
     std::ofstream output_file(args.output_file);
 
     // Prepare the aligner
-    theseus::TheseusAligner aligner(penalties, graph_file, theseus::TheseusAligner::GfaStreamTag{});
+    theseus::TheseusAligner aligner(penalties, heuristics, graph_file, theseus::TheseusAligner::GfaStreamTag{});
 
     // Read queries data
     std::vector<std::string> sequences, start_vertices;

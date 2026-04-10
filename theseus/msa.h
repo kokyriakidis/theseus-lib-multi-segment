@@ -561,7 +561,7 @@ namespace theseus {
                 throw std::runtime_error("Could not open output file for writing MSA.");
             }
             for (int i = 0; i < rows; ++i) {
-                out_file << ">Sequence_" << i + 1 << " "; // Sequence ID
+                out_file << ">Sequence_" << i + 1 << "\n"; // Sequence ID
                 for (int j = 1; j < columns - 1; ++j) {
                     out_file << msa[i][j];
                 }

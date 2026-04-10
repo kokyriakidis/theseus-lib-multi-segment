@@ -33,7 +33,8 @@
 namespace theseus {
 
 TheseusMSA::TheseusMSA(const Penalties &penalties,
-                               std::string_view seq) {
+                       const Heuristics &heuristics,
+                       std::string_view seq) {
 
     // Create the initial graph
     theseus::Graph G;
@@ -61,7 +62,7 @@ TheseusMSA::TheseusMSA(const Penalties &penalties,
     sink_v.first_poa_vtx = seq.size() + 1;
     G._vertices.push_back(sink_v);
 
-    msa_aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, std::move(G), true);
+    msa_aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(G), true);
 }
 
 /**

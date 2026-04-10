@@ -35,6 +35,7 @@
 
 #include "theseus/penalties.h"
 #include "theseus/alignment.h"
+#include "theseus/heuristics.h"
 
 
 /**
@@ -61,17 +62,27 @@ namespace theseus
          * Constructor from gfa
          *
          * @param penalties User defined alignment penalties
+         * @param heuristics Heuristics object
          * @param gfa_stream Input stream containing the graph in GFA format
+         * @param GfaStreamTag
          */
-        TheseusAligner(const Penalties &penalties, std::istream &gfa_stream, GfaStreamTag);
+        TheseusAligner(
+            const Penalties &penalties,
+            const Heuristics &heuristics,
+            std::istream &gfa_stream,
+            GfaStreamTag);
 
         /**
          * @brief Constructor from handlegraph graph
          *
          * @param penalties User defined alignment penalties
+         * @param heuristics Heuristics object
          * @param graph HandleGraph object representing the graph to be aligned to
          */
-        TheseusAligner(const Penalties &penalties, const handlegraph::HandleGraph &graph);
+        TheseusAligner(
+            const Penalties &penalties,
+            const Heuristics &heuristics,
+            const handlegraph::HandleGraph &graph);
 
         /**
          * Class destructor

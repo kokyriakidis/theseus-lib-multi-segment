@@ -89,8 +89,9 @@ TEST_CASE("Check sequence-to-graph aligner") {
         std::vector<int> expected_scores = {0, 2, 0, 4, 4};
 
         // Set aligner's parameters
-        theseus::Penalties penalties(0, 2, 3, 1);            // Create penalties object
-        theseus::TheseusAligner aligner(penalties, gfa_stream, theseus::TheseusAligner::GfaStreamTag{}); // Create aligner
+        theseus::Penalties penalties(0, 2, 3, 1);                            // Create penalties object
+        theseus::Heuristics heuristics(-1, -1, -1, -1);                      // Create heuristics object
+        theseus::TheseusAligner aligner(penalties, heuristics, gfa_stream, theseus::TheseusAligner::GfaStreamTag{}); // Create aligner
 
         // Align sequences and check results
         for (int i = 0; i < start_offsets.size(); ++i) {

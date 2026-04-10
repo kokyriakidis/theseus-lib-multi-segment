@@ -34,6 +34,7 @@
 #include "../../include/theseus/alignment.h"
 #include "../../include/theseus/penalties.h"
 #include "../../include/theseus/theseus_msa_aligner.h"
+#include "../../include/theseus/heuristics.h"
 
 
 TEST_CASE("Check MSA aligner") {
@@ -44,8 +45,9 @@ TEST_CASE("Check MSA aligner") {
         std::vector<char> expected_cigar = {'M','M','M','M','M','M','M','M','M','M','M','M','M'};
 
         // Set aligner's parameters
-        theseus::Penalties penalties(0, 2, 3, 1);            // Create penalties object
-        theseus::TheseusMSA aligner(penalties, initial_seq); // Create aligner
+        theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
+        theseus::Heuristics heuristics(-1, -1, -1, -1);                  // Create heuristics object
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq);
@@ -63,8 +65,9 @@ TEST_CASE("Check MSA aligner") {
         std::vector<char> expected_cigar = {'M','M','M','M','M','M','X','M','M','M','M','M','M'};
 
         // Set aligner's parameters
-        theseus::Penalties penalties(0, 2, 3, 1);            // Create penalties object
-        theseus::TheseusMSA aligner(penalties, initial_seq); // Create aligner
+        theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
+        theseus::Heuristics heuristics(-1, -1, -1, -1);                  // Create heuristics object
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq);
@@ -82,8 +85,9 @@ TEST_CASE("Check MSA aligner") {
         std::vector<char> expected_cigar = {'M','M','M','M','M','M','M','M','M','M','M','M','M', 'D','D','D'};
 
         // Set aligner's parameters
-        theseus::Penalties penalties(0, 2, 3, 1);            // Create penalties object
-        theseus::TheseusMSA aligner(penalties, initial_seq); // Create aligner
+        theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
+        theseus::Heuristics heuristics(-1, -1, -1, -1);                  // Create heuristics object
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq);
@@ -101,8 +105,9 @@ TEST_CASE("Check MSA aligner") {
         std::vector<char> expected_cigar = {'D','D','D','M','M','M','M','M','M','M','M','M','M','M','M','M'};
 
         // Set aligner's parameters
-        theseus::Penalties penalties(0, 2, 3, 1);            // Create penalties object
-        theseus::TheseusMSA aligner(penalties, initial_seq); // Create aligner
+        theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
+        theseus::Heuristics heuristics(-1, -1, -1, -1);                  // Create heuristics object
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq);
@@ -120,8 +125,9 @@ TEST_CASE("Check MSA aligner") {
         std::vector<char> expected_cigar = {'M','M','M','M','M','I','I','I','M','M','M','M','M'};
 
         // Set aligner's parameters
-        theseus::Penalties penalties(0, 2, 3, 1);            // Create penalties object
-        theseus::TheseusMSA aligner(penalties, initial_seq); // Create aligner
+        theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
+        theseus::Heuristics heuristics(-1, -1, -1, -1);                  // Create heuristics object
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq);
@@ -138,8 +144,9 @@ TEST_CASE("Check MSA aligner") {
         std::string new_seq = "ACCCCCATAAGAGGG";
 
         // Set aligner's parameters
-        theseus::Penalties penalties(0, 2, 3, 1);            // Create penalties object
-        theseus::TheseusMSA aligner(penalties, initial_seq); // Create aligner
+        theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
+        theseus::Heuristics heuristics(-1, -1, -1, -1);                  // Create heuristics object
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq);
@@ -158,8 +165,9 @@ TEST_CASE("Check MSA aligner") {
         std::string seq_4 = "ACCCCCATAAGAGGG";
 
         // Set aligner's parameters
-        theseus::Penalties penalties(0, 2, 3, 1);            // Create penalties object
-        theseus::TheseusMSA aligner(penalties, initial_seq); // Create aligner
+        theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
+        theseus::Heuristics heuristics(-1, -1, -1, -1);                  // Create heuristics object
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align and check sequence 1
         theseus::Alignment alignment = aligner.align(seq_1);

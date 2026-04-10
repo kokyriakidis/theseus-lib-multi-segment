@@ -36,6 +36,7 @@
 #include <string_view>
 
 #include "theseus/alignment.h"
+#include "theseus/heuristics.h"
 #include "theseus/penalties.h"
 #include "theseus/theseus_msa_aligner.h"
 
@@ -43,10 +44,17 @@
 
 // Command line arguments
 struct CMDArgs {
+    // Penalties
     int match = 0;
     int mismatch = 2;
     int gapo = 3;
     int gape = 1;
+    // Heuristics
+    int max_steps = -1;
+    int lag_threshold = -1;
+    int lag_density = -1;
+    double advancement_density = -1;
+    // I/O
     int output_type = 0;        // 0: MSA, 1: GFA, 2: Consensus, 3: Dot
     std::string sequences_file;
     std::string output_file;
@@ -120,7 +128,13 @@ void help() {
                  "                               3: Dot: Output in .dot format for visualization purposes.\n"
                  "                                       Only tractable for small graphs\n"
                  "  -f, --output <file>         Output file                                             [Required]\n"
-                 "  -s, --sequences <file>      Dataset file                                            [Required]\n";
+                 "  -s, --sequences <file>      Dataset file                                            [Required]\n\n"
+
+                 " Heuristics:\n"
+                 "  -l  --lag_behind             Threshold value for the lag behind heuristic                 \n"
+                 "  -L  --lag_density            Threshold value for the lag density heuristic                \n"
+                 "  -p  --max_steps              Maximum number of steps for the Theseus algorithm            \n"
+                 "  -d  --advancement_density    Minimum advancement density to continue alignment (else drop)\n";
 }
 
 CMDArgs parse_args(int argc, char *const *argv) {
@@ -131,13 +145,17 @@ CMDArgs parse_args(int argc, char *const *argv) {
                                           {"output_type", required_argument, 0, 't'},
                                           {"sequences", required_argument, 0, 's'},
                                           {"output", required_argument, 0, 'f'},
+                                          {"lag_behind", required_argument, 0, 'l'},
+                                          {"lag_density", required_argument, 0, 'L'},
+                                          {"max_steps", required_argument, 0, 'p'},
+                                          {"advancement_density", required_argument, 0, 'd'},
                                           {0, 0, 0, 0}};
 
     CMDArgs args;
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "m:x:o:e:t:s:f:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "m:x:o:e:t:s:f:l:L:p:d:", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'm':
                 args.match = std::stoi(optarg);
@@ -159,6 +177,18 @@ CMDArgs parse_args(int argc, char *const *argv) {
                 break;
             case 'f':
                 args.output_file = optarg;
+                break;
+            case 'l':
+                args.lag_threshold = std::stoi(optarg);
+                break;
+            case 'L':
+                args.lag_density = std::stoi(optarg);
+                break;
+            case 'p':
+                args.max_steps = std::stoi(optarg);
+                break;
+            case 'd':
+                args.advancement_density = std::stoi(optarg);
                 break;
             default:
                 std::cerr << "Invalid option" << std::endl;
@@ -189,6 +219,10 @@ int main(int argc, char *const *argv) {
     // Define alignment penalties
     theseus::Penalties penalties(args.match, args.mismatch, args.gapo, args.gape);
 
+    // Determine heuristics
+    // TODO: Implement advancement density correctly
+    theseus::Heuristics heuristics(args.lag_threshold, args.lag_density, args.advancement_density, args.max_steps);
+
     // Read the sequences for the MSA
     std::vector<std::string> sequences;
     read_sequences(sequences, args);
@@ -196,7 +230,7 @@ int main(int argc, char *const *argv) {
     // Prepare the data
     std::vector<theseus::Alignment> alignments(sequences.size());
     std::string_view initial_seq = sequences[0];
-    theseus::TheseusMSA aligner(penalties, initial_seq);
+    theseus::TheseusMSA aligner(penalties, heuristics, initial_seq);
 
     // Alignment with Theseus
     for (int j = 1; j < sequences.size(); ++j) {

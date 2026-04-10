@@ -33,6 +33,7 @@
 
 #include "theseus/penalties.h"
 #include "theseus/alignment.h"
+#include "theseus/heuristics.h"
 
 /**
  * Multiple Sequence Aligner (MSA) based on POA graphs. Internally uses the
@@ -51,10 +52,14 @@ namespace theseus
         /**
          * Initial constructor
          *
-         * @param penalties User defined alignment penalties
-         * @param seq Sequence to initialize the graph
+         * @param penalties  User defined alignment penalties
+         * @param heuristics User defined heuristics
+         * @param seq        Sequence to initialize the graph
          */
-        TheseusMSA(const Penalties &penalties, std::string_view seq);
+        TheseusMSA(
+            const Penalties &penalties,
+            const Heuristics &heuristics,
+            std::string_view seq);
 
         /**
          * Class destructor

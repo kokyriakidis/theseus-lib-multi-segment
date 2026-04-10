@@ -32,8 +32,10 @@
 namespace theseus {
 
 TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
+                                       const Heuristics &heuristics,
                                        Graph &&graph,
                                        bool msa) : _penalties(penalties),
+                                                          _heuristics(heuristics),
                                                           _graph(std::move(graph)),
                                                           _is_msa(msa),
                                                           _internal_penalties(penalties) {
@@ -71,6 +73,15 @@ void TheseusAlignerImpl::new_alignment() {
 
     // Set data for first score
     _scope->new_score(_score);
+
+    // Set initial alignment status
+    _alignment.theseus_status = THESEUS_STATUS_OK;
+
+    // Set heuristics
+    const auto n_scores = std::max({_internal_penalties.gapo() +_internal_penalties.gape(),
+                                  _internal_penalties.gapo() +_internal_penalties.gape(),
+                                  _internal_penalties.mism()}) + 1;
+    _heuristics.new_alignment(n_scores, _internal_penalties.mism(), _internal_penalties.gape());
 
     // TODO: Allow for different initial conditions. Now only global alignment.
     Cell init_condition;
@@ -153,11 +164,10 @@ Alignment TheseusAlignerImpl::align(
   // TODO: Set initial conditions
   _score = 0;
   _end_vertex = 2; // TODO: Set the end vertex
-  _end = false;
   // _graph.print_code_graphviz();
 
   // Find the optimal _score and an optimal alignment
-  while (!_end)
+  while (_alignment.theseus_status == THESEUS_STATUS_OK)
   {
     // Compute the values of the new wave
     // Initial extend
@@ -166,6 +176,10 @@ Alignment TheseusAlignerImpl::align(
     }
     compute_new_wave();
 
+    // Evaluate global heuristics
+    _alignment.theseus_status = (_alignment.theseus_status == THESEUS_STATUS_ALG_COMPLETED) ?
+                                 _alignment.theseus_status :
+                                  _heuristics.check_global_heuristics(_score);
     // Update _score
     _score = _score + 1;
 
@@ -177,11 +191,22 @@ Alignment TheseusAlignerImpl::align(
 
   // Backtrace
   _seq_ID += 1;
-  backtrace(0);
+  if (_alignment.theseus_status == THESEUS_STATUS_ALG_COMPLETED) {
+    backtrace();
 
-  // Update the graph in case of MSA
-  if (_is_msa) {
-      _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
+    // Update the graph in case of MSA
+    if (_is_msa) {
+        _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
+    }
+  }
+  else {
+    // Error messages
+    if (_alignment.theseus_status == THESEUS_STATUS_MAX_STEPS_REACHED) {
+      std::cerr << THESEUS_STATUS_MAX_STEPS_REACHED_MSG << std::endl;
+    }
+    else if (_alignment.theseus_status == THESEUS_STATUS_END_UNREACHABLE) {
+      std::cerr << THESEUS_STATUS_END_UNREACHABLE_MSG << std::endl;
+    }
   }
 
   return _alignment;
@@ -325,7 +350,7 @@ Alignment TheseusAlignerImpl::align(
     Scope::range new_range;
     new_range.start = _scope->i_wf(_score).size();
     for (auto diag : _scratchpad->active_diags()) {
-      if (_vertices_data->valid_diagonal<Cell::Matrix::I>(v, diag)) {
+      if (_vertices_data->valid_diagonal<Cell::Matrix::I>(v, diag) && !_heuristics.check_local_heuristics((*_scratchpad)[diag].offset)) {
         _scope->i_wf(_score).push_back((*_scratchpad)[diag]);     // Store Cell
       }
     }
@@ -368,7 +393,7 @@ void TheseusAlignerImpl::next_D(int upper_bound,
   Scope::range new_range;
   new_range.start = _scope->d_wf(_score).size();
   for (auto diag : _scratchpad->active_diags()) {
-    if (_vertices_data->valid_diagonal<Cell::Matrix::D>(v, diag)) {
+    if (_vertices_data->valid_diagonal<Cell::Matrix::D>(v, diag) && !_heuristics.check_local_heuristics((*_scratchpad)[diag].offset)) {
       _scope->d_wf(_score).push_back((*_scratchpad)[diag]); // Store Cell
     }
   }
@@ -409,7 +434,7 @@ void TheseusAlignerImpl::next_M(int upper_bound,
   Scope::range new_range;
   new_range.start = _beyond_scope->m_wf().size();
   for (auto diag : _scratchpad->active_diags()) {
-    if (_vertices_data->valid_diagonal<Cell::Matrix::M>(v, diag)) {
+    if (_vertices_data->valid_diagonal<Cell::Matrix::M>(v, diag) && !_heuristics.check_local_heuristics((*_scratchpad)[diag].offset)) {
       _beyond_scope->m_wf().push_back((*_scratchpad)[diag]);     // Store Cell
     }
   }
@@ -534,11 +559,12 @@ void TheseusAlignerImpl::check_end_condition(Cell curr_data, // Offset and prev_
 
   int j_end = _graph._vertices[v].value.size(); // The last node is empty
   if (!_is_msa && curr_data.offset == _seq.size()) {
-    _end = true;
+    _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
     _start_pos = curr_data;
   }
-  else if (_is_msa && curr_data.offset == _seq.size() && v == _end_vertex && j == j_end) { // End condition global alignment
-    _end = true;
+  else if (_is_msa && curr_data.offset == _seq.size()) {
+  // else if (_is_msa && curr_data.offset == _seq.size() && v == _end_vertex && j == j_end) { // End condition global alignment
+    _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
     _start_pos = curr_data;
   }
 }
@@ -645,7 +671,7 @@ void TheseusAlignerImpl::one_backtrace_step(
 
 
 // Main function of the backtracking process
-void TheseusAlignerImpl::backtrace(int initial_vertex)
+void TheseusAlignerImpl::backtrace()
 {
 
   Cell curr_pos = _start_pos;

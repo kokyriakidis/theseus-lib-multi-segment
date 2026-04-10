@@ -36,6 +36,7 @@
 
 #include "theseus/alignment.h"
 #include "theseus/penalties.h"
+#include "theseus/heuristics.h"
 
 #include "graph.h"
 #include "beyond_scope.h"
@@ -52,6 +53,7 @@ namespace theseus {
 class TheseusAlignerImpl {
 public:
     TheseusAlignerImpl(const Penalties &penalties,
+                       const Heuristics &heuristics,
                        Graph &&graph,
                        bool msa);
 
@@ -353,10 +355,8 @@ private:
     /**
      * @brief Backtrace the alignment from the end vertex to the start vertex.
      *
-     * @param initial_vertex
      */
-    void backtrace(
-        int initial_vertex);
+    void backtrace();
 
     /**
      * @brief Add a sequence to the graph. This is done by adding the sequence to
@@ -377,7 +377,6 @@ private:
     std::unique_ptr<POAGraph> _poa_graph; // Partial order alignment graph for MSA
 
     bool _is_msa;
-    bool _end = false;
     int _end_vertex;
     int _seq_ID = 0;
     int _start_node;
@@ -392,6 +391,9 @@ private:
     std::unique_ptr<VerticesData> _vertices_data;
 
     std::string_view _seq;
+
+    // TODO: heuristics object
+    Heuristics _heuristics;
 
     Alignment _alignment;
 };

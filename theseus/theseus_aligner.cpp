@@ -33,18 +33,20 @@
 namespace theseus {
 
 TheseusAligner::TheseusAligner(const Penalties &penalties,
+                               const Heuristics &heuristics,
                                std::istream &gfa_stream,
                                TheseusAligner::GfaStreamTag)
 {
     Graph graph(gfa_stream);
-    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, std::move(graph), false);
+    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(graph), false);
 }
 
 TheseusAligner::TheseusAligner(const Penalties &penalties,
+                               const Heuristics &heuristics,
                                const handlegraph::HandleGraph &handle_graph)
 {
     Graph graph(handle_graph);
-    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, std::move(graph), false);
+    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(graph), false);
 }
 
 
