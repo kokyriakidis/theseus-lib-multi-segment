@@ -29,6 +29,7 @@
 #pragma once
 
 #include <vector>
+#include "theseus/graph.h"
 #include "theseus/penalties.h"
 
 /**
@@ -38,6 +39,8 @@
  */
 
 namespace theseus {
+
+using NodeId = Graph::NodeId;
 
 class Alignment {
     public:
@@ -78,18 +81,18 @@ class Alignment {
     #define THESEUS_STATUS_UNKNOWN_MSG_SHORT           "Unknown"
 
 
-    /**
-     * @brief Backtrace objects: similar to the CIGAR in sequence alignment. It consists
-     *        of the set of edit operations of the alignment and the path of the alignment
-     *        through the reference graph.
-     */
-      std::vector<char> edit_op; // Edit operations
-      std::vector<int> path;     // Path of the alignment
-      int start_offset;          // Start offset in the first vertex of the path
-      int end_offset;            // End offset in the last vertex of the path
-      int theseus_status;        // Alignment status
+      /**
+       * @brief Backtrace objects: similar to the CIGAR in sequence alignment. It consists
+       *        of the set of edit operations of the alignment and the path of the alignment
+       *        through the reference graph.
+       */
+      std::vector<char> edit_op;    // Edit operations
+      std::vector<NodeId> path;     // Path of the alignment
+      int start_offset;             // Start offset in the first vertex of the path
+      int end_offset;               // End offset in the last vertex of the path
+      int theseus_status;           // Alignment status
 
-      // Compute the affine gap score of the CIGAR,
+
       /**
        * @brief Compute the affine gap score of the CIGAR. This is due to the fact
        * that we use equivalent internal penalties during the alignment stage that

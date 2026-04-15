@@ -35,6 +35,9 @@
 #include "../../include/theseus/penalties.h"
 #include "../../include/theseus/theseus_msa_aligner.h"
 #include "../../include/theseus/heuristics.h"
+#include "../../include/theseus/graph.h"
+
+using NodeId = theseus::Graph::NodeId;
 
 
 TEST_CASE("Check MSA aligner") {
@@ -50,12 +53,12 @@ TEST_CASE("Check MSA aligner") {
         theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
-        theseus::Alignment alignment = aligner.align(new_seq);
+        theseus::Alignment alignment = aligner.align(new_seq, false);
 
         // Check if alignment was successful
         CHECK(alignment.compute_affine_gap_score(penalties) == 0); // Check score
         CHECK(alignment.edit_op == expected_cigar);                  // Check CIGAR
-        CHECK(alignment.path == std::vector<int>({0, 1, 2}));        // Check path
+        CHECK(alignment.path == std::vector<NodeId>({0, 1, 2}));     // Check path
     }
 
     SUBCASE("Correct MSA with a sequence with a mismatch") {
@@ -75,7 +78,7 @@ TEST_CASE("Check MSA aligner") {
         // Check if alignment was successful
         CHECK(alignment.compute_affine_gap_score(penalties) == 2); // Check score
         CHECK(alignment.edit_op == expected_cigar);                  // Check CIGAR
-        CHECK(alignment.path == std::vector<int>({0, 1, 2}));        // Check path
+        CHECK(alignment.path == std::vector<NodeId>({0, 1, 2}));        // Check path
     }
 
     SUBCASE("Correct MSA with an deletion at the end") {
@@ -90,12 +93,12 @@ TEST_CASE("Check MSA aligner") {
         theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
-        theseus::Alignment alignment = aligner.align(new_seq);
+        theseus::Alignment alignment = aligner.align(new_seq, false);
 
         // Check if alignment was successful
-        CHECK(alignment.compute_affine_gap_score(penalties) == 6); // Check score
-        CHECK(alignment.edit_op == expected_cigar);                  // Check CIGAR
-        CHECK(alignment.path == std::vector<int>({0, 1, 2}));        // Check path
+        CHECK(alignment.compute_affine_gap_score(penalties) == 6);    // Check score
+        CHECK(alignment.edit_op == expected_cigar);                      // Check CIGAR
+        CHECK(alignment.path == std::vector<NodeId>({0, 1, 2}));         // Check path
     }
 
     SUBCASE("Correct MSA with an deletion at the beginning") {
@@ -110,12 +113,12 @@ TEST_CASE("Check MSA aligner") {
         theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
-        theseus::Alignment alignment = aligner.align(new_seq);
+        theseus::Alignment alignment = aligner.align(new_seq, false);
 
         // Check if alignment was successful
         CHECK(alignment.compute_affine_gap_score(penalties) == 6); // Check score
         CHECK(alignment.edit_op == expected_cigar);                  // Check CIGAR
-        CHECK(alignment.path == std::vector<int>({0, 1, 2}));        // Check path
+        CHECK(alignment.path == std::vector<NodeId>({0, 1, 2}));        // Check path
     }
 
     SUBCASE("Correct MSA with an insertion in the middle") {
@@ -130,12 +133,12 @@ TEST_CASE("Check MSA aligner") {
         theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
-        theseus::Alignment alignment = aligner.align(new_seq);
+        theseus::Alignment alignment = aligner.align(new_seq, false);
 
         // Check if alignment was successful
         CHECK(alignment.compute_affine_gap_score(penalties) == 6); // Check score
         CHECK(alignment.edit_op == expected_cigar);                  // Check CIGAR
-        CHECK(alignment.path == std::vector<int>({0, 1, 2}));        // Check path
+        CHECK(alignment.path == std::vector<NodeId>({0, 1, 2}));        // Check path
     }
 
     SUBCASE("Correct MSA with diverging sequence") {
@@ -149,20 +152,20 @@ TEST_CASE("Check MSA aligner") {
         theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align the new sequence
-        theseus::Alignment alignment = aligner.align(new_seq);
+        theseus::Alignment alignment = aligner.align(new_seq, false);
 
         // Check if alignment was successful
         CHECK(alignment.compute_affine_gap_score(penalties) == 9); // Check score
-        CHECK(alignment.path == std::vector<int>({0, 1, 2}));        // Check path
+        CHECK(alignment.path == std::vector<NodeId>({0, 1, 2}));        // Check path
     }
 
     SUBCASE("Correct MSA with several sequences") {
         // Equal sequences
         std::string initial_seq = "ACCCGTAAAAGGG";
-        std::string seq_1 = "ACCCGTCAAAGGG";
-        std::string seq_2 = "ACCCGAAGGG";
-        std::string seq_3 = "ACCCGTCAAAGGG";
-        std::string seq_4 = "ACCCCCATAAGAGGG";
+        std::string seq_1       = "ACCCGTCAAAGGG";
+        std::string seq_2       = "ACCCGAAGGG";
+        std::string seq_3       = "ACCCGTCAAAGGG";
+        std::string seq_4       = "ACCCCCATAAGAGGG";
 
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
@@ -170,19 +173,50 @@ TEST_CASE("Check MSA aligner") {
         theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
 
         // Align and check sequence 1
-        theseus::Alignment alignment = aligner.align(seq_1);
+        theseus::Alignment alignment = aligner.align(seq_1, false);
         CHECK(alignment.compute_affine_gap_score(penalties) == 2); // Check score
 
         // Align and check sequence 2
-        alignment = aligner.align(seq_2);
+        alignment = aligner.align(seq_2, false);
         CHECK(alignment.compute_affine_gap_score(penalties) == 6); // Check score
 
         // Align and check sequence 3
-        alignment = aligner.align(seq_3);
+        alignment = aligner.align(seq_3, false);
         CHECK(alignment.compute_affine_gap_score(penalties) == 0); // Check score
 
         // Align and check sequence 4
-        alignment = aligner.align(seq_4);
+        alignment = aligner.align(seq_4, false);
         CHECK(alignment.compute_affine_gap_score(penalties) == 9); // Check score
+    }
+
+    SUBCASE("Correct reversed MSA") {
+        // Equal sequences
+        std::string initial_seq = "ACCCGTAAAAGGG";
+        std::string seq_1       = "ACCCGTCAAAGGG";
+        std::string seq_2       = "ACCCGAAGGG";
+        std::string seq_3       = "GTAAAAGGG";
+        // std::string seq_3       = "ACCCGTCAAAGGG";
+        // std::string seq_4       = "ACCCCCATAAGAGGG";
+
+        // Set aligner's parameters
+        theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
+        theseus::Heuristics heuristics(-1, -1, -1, -1);                  // Create heuristics object
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
+
+        // Align and check sequence 1
+        theseus::Alignment alignment = aligner.align(seq_1, true);
+        CHECK(alignment.compute_affine_gap_score(penalties) == 2); // Check score
+
+        // Align and check sequence 2
+        alignment = aligner.align(seq_2, false);
+        CHECK(alignment.compute_affine_gap_score(penalties) == 6); // Check score
+
+        // // Align and check sequence 3
+        alignment = aligner.align(seq_3, true);
+        CHECK(alignment.compute_affine_gap_score(penalties) == 0); // Check score
+
+        // // Align and check sequence 4
+        // alignment = aligner.align(seq_4, false);
+        // CHECK(alignment.compute_affine_gap_score(penalties) == 9); // Check score
     }
 }

@@ -34,11 +34,12 @@ namespace theseus {
 TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
                                        const Heuristics &heuristics,
                                        Graph &&graph,
-                                       bool msa) : _penalties(penalties),
-                                                          _heuristics(heuristics),
-                                                          _graph(std::move(graph)),
-                                                          _is_msa(msa),
-                                                          _internal_penalties(penalties) {
+                                       bool msa) :  _penalties(penalties),
+                                                    _heuristics(heuristics),
+                                                    _graph(std::move(graph)),
+                                                    _is_msa(msa),
+                                                    _internal_penalties(penalties),
+                                                    _seq("", false) {
     // TODO: Gap-linear and dual affine-gap.
     const auto n_scores = std::max({_internal_penalties.gapo() +_internal_penalties.gape(),
                                   _internal_penalties.gapo() +_internal_penalties.gape(),
@@ -57,44 +58,56 @@ TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
     _scratchpad = std::make_unique<ScratchPad>(-1024, 1024);
 }
 
-void TheseusAlignerImpl::new_alignment() {
+// Get the node/reversed node depending on the alignment configuration
+NodeView TheseusAlignerImpl::get_node(NodeId id) {
+  if (!_reversed_alignment) return _graph.node(id);
+  else return _graph.node_rev(id);
+}
+
+bool TheseusAlignerImpl::has_out_nodes(NodeId id) {
+  if (!_reversed_alignment) return !_graph.is_sink(id);
+  else return !_graph.is_source(id);
+}
+
+void TheseusAlignerImpl::new_alignment(SequenceView seq,
+                                       bool reverse_alignment) {
+    _scope->new_alignment();
+    _beyond_scope->new_alignment();
+    _vertices_data->new_alignment();
+    _seq = seq;
+    _reversed_alignment = reverse_alignment;
+    // Initialize scratchpad
     int max_diag = 0, v_n;
-    for (int l = 0; l < _graph._vertices.size(); ++l) {
-      v_n = _graph._vertices[l].value.size();
-      max_diag = std::max(max_diag, v_n);
+    NodeIdRange nodes = _graph.nodes();
+    for (const auto &node : nodes) {
+        v_n = _graph.node_size(node);
+        max_diag = std::max(max_diag, v_n);
     }
     const int min_diag = -_seq.size();
-
     if (_scratchpad->max_diag() < max_diag ||
         _scratchpad->min_diag() > min_diag) {
         // TODO: Compute the max and min with a factor.
         _scratchpad = std::make_unique<ScratchPad>(min_diag, max_diag);
     }
-
     // Set data for first score
     _scope->new_score(_score);
-
     // Set initial alignment status
     _alignment.theseus_status = THESEUS_STATUS_OK;
-
     // Set heuristics
     const auto n_scores = std::max({_internal_penalties.gapo() +_internal_penalties.gape(),
                                   _internal_penalties.gapo() +_internal_penalties.gape(),
                                   _internal_penalties.mism()}) + 1;
     _heuristics.new_alignment(n_scores, _internal_penalties.mism(), _internal_penalties.gape());
-
     // TODO: Allow for different initial conditions. Now only global alignment.
     Cell init_condition;
     init_condition.offset = 0;
     init_condition.vertex_id = _start_node;
     init_condition.diag = _start_offset;
     init_condition.prev_pos = -1;
-
     // Initial vertex data
     _beyond_scope->m_jumps_wf().push_back(init_condition);
     _vertices_data->activate_vertex(_start_node);
     _vertices_data->get_vertex_data(_start_node)._m_jumps_positions[0].push_back(0);
-
     // Alignment data
     _alignment.path.clear();
     _alignment.edit_op.clear();
@@ -102,98 +115,89 @@ void TheseusAlignerImpl::new_alignment() {
 
 
 // Process a given vertex with a given _score
-void TheseusAlignerImpl::process_vertex(Graph::vertex* curr_v,
-                                        int v) {
+void TheseusAlignerImpl::process_vertex(NodeId curr_node_id) {
 
-  // Perform the next operation
-  int upper_bound = curr_v->value.size();
-  next_I(curr_v, upper_bound, v);
+  // Next
+  int upper_bound = _graph.node_size(curr_node_id);
+  next_I(upper_bound, curr_node_id);
   _scratchpad->reset();
-  next_D(upper_bound, v);
+  next_D(upper_bound, curr_node_id);
   _scratchpad->reset();
-  next_M(upper_bound, v);
+  next_M(upper_bound, curr_node_id);
   _scratchpad->reset();
-
-  // Perform the extend operations
-  int v_pos = _vertices_data->get_id(v);
+  // Extend
+  int v_pos = _vertices_data->get_id(curr_node_id);
   Scope::range cells_range = _scope->m_pos(_score)[v_pos];
   for (Cell::pos_t idx = cells_range.start; idx < cells_range.end; ++idx) {
-    extend_diagonal(curr_v, _beyond_scope->m_wf()[idx], v, _beyond_scope->m_wf()[idx], idx, Cell::Matrix::M);
+    extend_diagonal(curr_node_id, _beyond_scope->m_wf()[idx], _beyond_scope->m_wf()[idx], idx, Cell::Matrix::M);
   }
 }
 
 
 void TheseusAlignerImpl::compute_new_wave() {
-
   // Update invalid segments
   _vertices_data->expand();
   _vertices_data->compact();
-
   // Process all active vertices
-  int num_active_vertices = _vertices_data->num_active_vertices(), v;
+  int num_active_vertices = _vertices_data->num_active_vertices();
+  NodeId curr_node_id;
   for (int l = 0; l < num_active_vertices; ++l) {
-    v = _vertices_data->get_vertex_id(l);
-    Graph::vertex* curr_v = &_graph._vertices[v];
-    process_vertex(curr_v, v);
+    curr_node_id = _vertices_data->get_vertex_id(l);
+    process_vertex(curr_node_id);
   }
 }
 
 
 Alignment TheseusAlignerImpl::align(
     std::string_view seq,
-    std::string &start_node,
-    int start_offset)
+    NodeId &start_node,
+    int start_offset,
+    bool reverse_alignment)
 {
-  _scope->new_alignment();
-  _beyond_scope->new_alignment();
-  _vertices_data->new_alignment();
-  _seq = seq;
-
+  // Set start position
   if (_is_msa) {
-    _start_node = 0;
-    _start_offset = 0;
+    if (!reverse_alignment) {
+      _start_node = 0;
+      _start_offset = 0;
+    }
+    else {
+      _start_node = 2;
+      _start_offset = 0;
+    }
   }
   else {
-    _start_node = _graph.get_id(start_node);
+    _start_node = start_node;
     _start_offset = start_offset;
   }
-
   // Initialize data for the new alignment
-  new_alignment();
-
-  // TODO: Set initial conditions
+  new_alignment(Graph::SequenceView(seq, reverse_alignment), reverse_alignment);
   _score = 0;
-  _end_vertex = 2; // TODO: Set the end vertex
+  // _end_vertex = 2; // TODO: Set the end vertex
   // _graph.print_code_graphviz();
-
-  // Find the optimal _score and an optimal alignment
-  while (_alignment.theseus_status == THESEUS_STATUS_OK)
-  {
-    // Compute the values of the new wave
+  // Main alignment loop
+  while (_alignment.theseus_status == THESEUS_STATUS_OK) {
     // Initial extend
     if (_score == 0) {
-      extend_diagonal(&_graph._vertices[_start_node], _beyond_scope->m_jumps_wf()[0], _start_node, _beyond_scope->m_jumps_wf()[0], 0, Cell::Matrix::MJumps);
+      NodeView start_node = get_node(_start_node);
+      extend_diagonal(_start_node, _beyond_scope->m_jumps_wf()[0], _beyond_scope->m_jumps_wf()[0], 0, Cell::Matrix::MJumps);
     }
+    // Next wave + extend
     compute_new_wave();
-
     // Evaluate global heuristics
     _alignment.theseus_status = (_alignment.theseus_status == THESEUS_STATUS_ALG_COMPLETED) ?
                                  _alignment.theseus_status :
                                   _heuristics.check_global_heuristics(_score);
-    // Update _score
+    // Update score
     _score = _score + 1;
-
     // Clear the corresponding waves and metadata from the scope
     _scope->new_score(_score);
     _vertices_data->new_score(_score);
   }
   _score -= 1;
-
   // Backtrace
   _seq_ID += 1;
   if (_alignment.theseus_status == THESEUS_STATUS_ALG_COMPLETED) {
     backtrace();
-
     // Update the graph in case of MSA
     if (_is_msa) {
         _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
@@ -208,7 +212,6 @@ Alignment TheseusAlignerImpl::align(
       std::cerr << THESEUS_STATUS_END_UNREACHABLE_MSG << std::endl;
     }
   }
-
   return _alignment;
 }
 
@@ -220,10 +223,8 @@ Alignment TheseusAlignerImpl::align(
                                            int m,
                                            int upper_bound)
   {
-
     Cell::pos_t len = cells_range.end - cells_range.start, new_col;
     Cell new_cell;
-
     // Sparsify the active diagonals
     for (int l = 0; l < len; ++l)
     {
@@ -233,13 +234,11 @@ Alignment TheseusAlignerImpl::align(
       new_cell.from_matrix = Cell::Matrix::M;
       new_cell.prev_pos = cells_range.start + l;
       new_col = new_cell.offset + new_cell.diag; // d = j - i -> j = d + i
-
       // Check validity
       if (new_cell.offset <= m && new_col <= upper_bound)
       { // If in bounds
         // Branchless push_back
         auto &cell = _scratchpad->access_alloc(new_cell.diag);
-
         // If better offset
         const bool cmp = cell.offset < new_cell.offset;
         cell = (cmp) ? new_cell : cell;
@@ -258,7 +257,6 @@ Alignment TheseusAlignerImpl::align(
   {
     int len = jumps_positions.size(), new_col, pos;
     Cell new_cell;
-
     // Sparsify the active diagonals
     for (int l = 0; l < len; ++l)
     {
@@ -269,13 +267,11 @@ Alignment TheseusAlignerImpl::align(
       new_cell.diag += shift_factor;
       new_cell.offset += offset_increase;
       new_col = new_cell.offset + new_cell.diag; // d = j - i -> j = d + i
-
       // Check validity
       if (new_cell.offset <= m && new_col <= upper_bound)
       { // If in bounds
         // Branchless push_back
         auto &cell = _scratchpad->access_alloc(new_cell.diag);
-
         // If better offset
         const bool cmp = cell.offset < new_cell.offset;
         cell = (cmp) ? new_cell : cell;
@@ -291,10 +287,8 @@ Alignment TheseusAlignerImpl::align(
                                                int m,
                                                int upper_bound)
   {
-
     Cell::pos_t len = cells_range.end - cells_range.start, new_col;
     Cell new_cell;
-
     // Sparsify the active diagonals
     for (int l = 0; l < len; ++l)
     {
@@ -303,13 +297,11 @@ Alignment TheseusAlignerImpl::align(
       new_cell.diag += shift_factor;
       new_cell.offset += offset_increase;
       new_col = new_cell.offset + new_cell.diag; // d = j - i -> j = d + i
-
       // Check validity
       if (new_cell.offset <= m && new_col <= upper_bound)
       { // If in bounds
         // Branchless push_back
         auto &cell = _scratchpad->access_alloc(new_cell.diag);
-
         // If better offset
         const bool cmp = cell.offset < new_cell.offset;
         cell = (cmp) ? new_cell : cell;
@@ -318,82 +310,84 @@ Alignment TheseusAlignerImpl::align(
   }
 
   // Compute next I matrix
-  void TheseusAlignerImpl::next_I(Graph::vertex * curr_v,
-                                  int upper_bound,
-                                  int v)
+  void TheseusAlignerImpl::next_I(int upper_bound,
+                                  NodeId curr_node_id)
   {
-
     // Sparsify data (put it in the scratch pad)
     int pos_prev_M = _score - (_internal_penalties.gapo() + _internal_penalties.gape()), pos_prev_I = _score - _internal_penalties.gape(), pos_prev_M_scope = _vertices_data->get_pos(pos_prev_M);
     int pos_prev_I_scope = _vertices_data->get_pos(pos_prev_I);
-
     // Come from an Insertion
     if (pos_prev_I >= 0) {
-      if (_scope->i_pos(pos_prev_I).size() > _vertices_data->get_id(v))
+      if (_scope->i_pos(pos_prev_I).size() > _vertices_data->get_id(curr_node_id))
       {
-        Scope::range cells_range = _scope->i_pos(pos_prev_I)[_vertices_data->get_id(v)];
+        Scope::range cells_range = _scope->i_pos(pos_prev_I)[_vertices_data->get_id(curr_node_id)];
         sparsify_indel_data(_scope->i_wf(pos_prev_I), 0, 1, cells_range, _seq.size(), upper_bound); // Sparsify I data
       };
-      sparsify_jumps_data(_beyond_scope->i_jumps_wf(), _vertices_data->get_vertex_data(v)._i_jumps_positions[pos_prev_I_scope], 0, 1, _seq.size(), upper_bound, Cell::Matrix::IJumps);
+      sparsify_jumps_data(
+        _beyond_scope->i_jumps_wf(),
+        _vertices_data->get_vertex_data(curr_node_id)._i_jumps_positions[pos_prev_I_scope],
+        0, 1, _seq.size(), upper_bound, Cell::Matrix::IJumps);
     }
-
     // Come from M
     if (pos_prev_M >= 0) {
-      if (_scope->m_pos(pos_prev_M).size() > _vertices_data->get_id(v)) {
-        Scope::range cells_range = _scope->m_pos(pos_prev_M)[_vertices_data->get_id(v)];
+      if (_scope->m_pos(pos_prev_M).size() > _vertices_data->get_id(curr_node_id)) {
+        Scope::range cells_range = _scope->m_pos(pos_prev_M)[_vertices_data->get_id(curr_node_id)];
         sparsify_M_data(_beyond_scope->m_wf(), 0, 1, cells_range, _seq.size(), upper_bound); // Sparsify M data
       }
-      sparsify_jumps_data(_beyond_scope->m_jumps_wf(), _vertices_data->get_vertex_data(v)._m_jumps_positions[pos_prev_M_scope], 0, 1, _seq.size(), upper_bound, Cell::Matrix::MJumps);
+      sparsify_jumps_data(_beyond_scope->m_jumps_wf(),
+          _vertices_data->get_vertex_data(curr_node_id)._m_jumps_positions[pos_prev_M_scope],
+          0, 1, _seq.size(), upper_bound, Cell::Matrix::MJumps);
     }
-
     // Densify data (store it in the big wavefront)
     Scope::range new_range;
     new_range.start = _scope->i_wf(_score).size();
     for (auto diag : _scratchpad->active_diags()) {
-      if (_vertices_data->valid_diagonal<Cell::Matrix::I>(v, diag) && !_heuristics.check_local_heuristics((*_scratchpad)[diag].offset)) {
+      if (_vertices_data->valid_diagonal<Cell::Matrix::I>(curr_node_id, diag)
+      && !_heuristics.check_local_heuristics((*_scratchpad)[diag].offset)) {
         _scope->i_wf(_score).push_back((*_scratchpad)[diag]);     // Store Cell
       }
     }
     new_range.end = _scope->i_wf(_score).size();
     _scope->i_pos(_score).push_back(new_range);
-
     // Check, store and invalidate new I jumps
-    if (curr_v->out_edges.size() > 0) {
-      check_and_store_jumps(curr_v, _scope->i_wf(_score), new_range);
+    if (has_out_nodes(curr_node_id)) {
+      NodeView curr_node = get_node(curr_node_id);
+      check_and_store_jumps(curr_node, _scope->i_wf(_score), new_range);
     }
 }
 
 
 // Compute next D matrix
 void TheseusAlignerImpl::next_D(int upper_bound,
-                                int v)
+                                NodeId curr_node_id)
 {
-
   // Sparsify data (put it in the scratch pad)
-  int pos_prev_M = _score - (_internal_penalties.gapo() + _internal_penalties.gape()), pos_prev_D = _score - _internal_penalties.gape(), pos_prev_M_scope = _vertices_data->get_pos(pos_prev_M);
-
+  int pos_prev_M = _score - (_internal_penalties.gapo() + _internal_penalties.gape()),
+      pos_prev_D = _score - _internal_penalties.gape(),
+      pos_prev_M_scope = _vertices_data->get_pos(pos_prev_M);
   // Come from a Deletion
-  if (pos_prev_D >= 0 && _scope->d_pos(pos_prev_D).size() > _vertices_data->get_id(v))
+  if (pos_prev_D >= 0 && _scope->d_pos(pos_prev_D).size() > _vertices_data->get_id(curr_node_id))
   {
-    Scope::range cells_range = _scope->d_pos(pos_prev_D)[_vertices_data->get_id(v)];
-    sparsify_indel_data(_scope->d_wf(pos_prev_D), 1, -1, cells_range, _seq.size(), upper_bound); // Sparsify D data
+    Scope::range cells_range = _scope->d_pos(pos_prev_D)[_vertices_data->get_id(curr_node_id)];
+    sparsify_indel_data(_scope->d_wf(pos_prev_D), 1, -1, cells_range, _seq.size(), upper_bound);
   }
-
   // Come from M
   if (pos_prev_M >= 0) {
-    if (_scope->m_pos(pos_prev_M).size() > _vertices_data->get_id(v))
+    if (_scope->m_pos(pos_prev_M).size() > _vertices_data->get_id(curr_node_id))
     {
-      Scope::range cells_range = _scope->m_pos(pos_prev_M)[_vertices_data->get_id(v)];
+      Scope::range cells_range = _scope->m_pos(pos_prev_M)[_vertices_data->get_id(curr_node_id)];
       sparsify_M_data(_beyond_scope->m_wf(), 1, -1, cells_range, _seq.size(), upper_bound); // Sparsify M data
     }
-    sparsify_jumps_data(_beyond_scope->m_jumps_wf(), _vertices_data->get_vertex_data(v)._m_jumps_positions[pos_prev_M_scope], 1, -1, _seq.size(), upper_bound, Cell::Matrix::MJumps);
+    sparsify_jumps_data(_beyond_scope->m_jumps_wf(),
+        _vertices_data->get_vertex_data(curr_node_id)._m_jumps_positions[pos_prev_M_scope],
+        1, -1, _seq.size(), upper_bound, Cell::Matrix::MJumps);
   }
-
   // Densify data (store it in the big wavefront)
   Scope::range new_range;
   new_range.start = _scope->d_wf(_score).size();
   for (auto diag : _scratchpad->active_diags()) {
-    if (_vertices_data->valid_diagonal<Cell::Matrix::D>(v, diag) && !_heuristics.check_local_heuristics((*_scratchpad)[diag].offset)) {
+    if (_vertices_data->valid_diagonal<Cell::Matrix::D>(curr_node_id, diag)
+    && !_heuristics.check_local_heuristics((*_scratchpad)[diag].offset)) {
       _scope->d_wf(_score).push_back((*_scratchpad)[diag]); // Store Cell
     }
   }
@@ -404,37 +398,38 @@ void TheseusAlignerImpl::next_D(int upper_bound,
 
 // Compute next M matrix
 void TheseusAlignerImpl::next_M(int upper_bound,
-                                int v) {
-
+                                NodeId curr_node_id) {
   // Sparsify data (put it in the scratch pad)
-  int pos_prev_M = _score - _internal_penalties.mism(), pos_prev_D = _score, pos_prev_I = _score, pos_prev_M_scope = _vertices_data->get_pos(pos_prev_M);
-
+  int pos_prev_M = _score - _internal_penalties.mism(),
+      pos_prev_D = _score,
+      pos_prev_I = _score,
+      pos_prev_M_scope = _vertices_data->get_pos(pos_prev_M);
   // Come from a Deletion
-  if (_scope->d_pos(pos_prev_D).size() > _vertices_data->get_id(v))  {
-    Scope::range cells_range = _scope->d_pos(pos_prev_D)[_vertices_data->get_id(v)];
-    sparsify_indel_data(_scope->d_wf(pos_prev_D), 0, 0, cells_range, _seq.size(), upper_bound);  // Sparsify D data
+  if (_scope->d_pos(pos_prev_D).size() > _vertices_data->get_id(curr_node_id))  {
+    Scope::range cells_range = _scope->d_pos(pos_prev_D)[_vertices_data->get_id(curr_node_id)];
+    sparsify_indel_data(_scope->d_wf(pos_prev_D), 0, 0, cells_range, _seq.size(), upper_bound);
   }
-
   // Come from an Insertion
-  if (_scope->i_pos(pos_prev_I).size() > _vertices_data->get_id(v))  {
-    Scope::range cells_range = _scope->i_pos(pos_prev_I)[_vertices_data->get_id(v)];
-    sparsify_indel_data(_scope->i_wf(pos_prev_I), 0, 0, cells_range, _seq.size(), upper_bound);  // Sparsify I data
+  if (_scope->i_pos(pos_prev_I).size() > _vertices_data->get_id(curr_node_id))  {
+    Scope::range cells_range = _scope->i_pos(pos_prev_I)[_vertices_data->get_id(curr_node_id)];
+    sparsify_indel_data(_scope->i_wf(pos_prev_I), 0, 0, cells_range, _seq.size(), upper_bound);
   }
-
   // Come from M
   if (pos_prev_M >= 0) {
-    if (_scope->m_pos(pos_prev_M).size() > _vertices_data->get_id(v))  {
-      Scope::range cells_range = _scope->m_pos(pos_prev_M)[_vertices_data->get_id(v)];
-      sparsify_M_data(_beyond_scope->m_wf(), 1, 0, cells_range,  _seq.size(), upper_bound);  // Sparsify M data
+    if (_scope->m_pos(pos_prev_M).size() > _vertices_data->get_id(curr_node_id))  {
+      Scope::range cells_range = _scope->m_pos(pos_prev_M)[_vertices_data->get_id(curr_node_id)];
+      sparsify_M_data(_beyond_scope->m_wf(), 1, 0, cells_range,  _seq.size(), upper_bound);
     }
-    sparsify_jumps_data(_beyond_scope->m_jumps_wf(), _vertices_data->get_vertex_data(v)._m_jumps_positions[pos_prev_M_scope], 1, 0, _seq.size(), upper_bound, Cell::Matrix::MJumps);
+    sparsify_jumps_data(_beyond_scope->m_jumps_wf(),
+        _vertices_data->get_vertex_data(curr_node_id)._m_jumps_positions[pos_prev_M_scope],
+        1, 0, _seq.size(), upper_bound, Cell::Matrix::MJumps);
   }
-
   // Densify data (store it in the big wavefront)
   Scope::range new_range;
   new_range.start = _beyond_scope->m_wf().size();
   for (auto diag : _scratchpad->active_diags()) {
-    if (_vertices_data->valid_diagonal<Cell::Matrix::M>(v, diag) && !_heuristics.check_local_heuristics((*_scratchpad)[diag].offset)) {
+    if (_vertices_data->valid_diagonal<Cell::Matrix::M>(curr_node_id, diag)
+    && !_heuristics.check_local_heuristics((*_scratchpad)[diag].offset)) {
       _beyond_scope->m_wf().push_back((*_scratchpad)[diag]);     // Store Cell
     }
   }
@@ -443,70 +438,65 @@ void TheseusAlignerImpl::next_M(int upper_bound,
 }
 
 
-
 // Store the jump in neighbours
-void TheseusAlignerImpl::store_M_jump(Graph::vertex* curr_v,
+void TheseusAlignerImpl::store_M_jump(NodeView curr_node,
                                       Cell &prev_cell,
                                       Cell::pos_t prev_pos,
                                       Cell::Matrix from_matrix) {
-
   // Invalidate the jumping diagonal
   _vertices_data->invalidate_m_jump(_vertices_data->get_id(prev_cell.vertex_id), prev_cell.diag);
   int pos_score = _vertices_data->get_pos(_score);
-  int new_diag = -prev_cell.offset;
-  int num_out_v = curr_v->out_edges.size();
+  int new_diag  = -prev_cell.offset;
   Cell new_cell = prev_cell;
   new_cell.from_matrix = from_matrix;
   new_cell.prev_pos = prev_pos;
-
-  for (int l = 0; l < num_out_v; ++l) {
-    new_cell.vertex_id = curr_v->out_edges[l].to_vertex;
-    new_cell.diag = new_diag + curr_v->out_edges[l].overlap;
-    Graph::vertex* new_v = &_graph._vertices[new_cell.vertex_id];
+  // For each neighbour, store the jump and metadata
+  for (auto out_node_id : curr_node.out_nodes) {
+    new_cell.vertex_id = out_node_id;
+    new_cell.diag = new_diag;
+    NodeView out_node = get_node(out_node_id);
     _vertices_data->activate_vertex(new_cell.vertex_id);
-
     // Store jump and metadata
-    bool valid_diag = _vertices_data->valid_diagonal<Cell::Matrix::M>(new_cell.vertex_id, new_cell.diag); // Extend only if it has not yet been visited
-    if (valid_diag) { // Extend only if it has not yet been visited
+    bool valid_diag = _vertices_data->valid_diagonal<Cell::Matrix::M>(new_cell.vertex_id, new_cell.diag);
+    // Extend only if it has not yet been visited
+    if (valid_diag) {
       int pos_new_cell = _beyond_scope->m_jumps_wf().size();
       _beyond_scope->m_jumps_wf().push_back(new_cell);
       _vertices_data->get_vertex_data(new_cell.vertex_id)._m_jumps_positions[pos_score].push_back(pos_new_cell);
-      extend_diagonal(new_v, _beyond_scope->m_jumps_wf()[pos_new_cell], new_cell.vertex_id, _beyond_scope->m_jumps_wf()[pos_new_cell], pos_new_cell, Cell::Matrix::MJumps);
+      extend_diagonal(out_node_id, _beyond_scope->m_jumps_wf()[pos_new_cell], _beyond_scope->m_jumps_wf()[pos_new_cell], pos_new_cell, Cell::Matrix::MJumps);
     }
   }
 }
 
 
 // Store the jump in neighbours
-void TheseusAlignerImpl::store_I_jump(Graph::vertex* curr_v,
-                                      Cell& prev_cell,
-                                      Cell::pos_t prev_pos,
-                                      Cell::Matrix from_matrix) {
-
+void TheseusAlignerImpl::store_I_jump(
+    NodeView curr_node,
+    Cell& prev_cell,
+    Cell::pos_t prev_pos,
+    Cell::Matrix from_matrix)
+{
   // Invalidate the jumping diagonal
   _vertices_data->invalidate_i_jump(_vertices_data->get_id(prev_cell.vertex_id), prev_cell.diag);
-
   int pos_score = _vertices_data->get_pos(_score);
   int new_diag = -prev_cell.offset;
-  int len = curr_v->out_edges.size();
   Cell new_cell = prev_cell;
   new_cell.from_matrix = from_matrix;
   new_cell.prev_pos = prev_pos;
-  for (int l = 0; l < len; ++l) {
-    new_cell.vertex_id = curr_v->out_edges[l].to_vertex;
-    new_cell.diag = new_diag + curr_v->out_edges[l].overlap;
+  // For each neighbour, store the jump and metadata
+  for (auto out_node_id : curr_node.out_nodes) {
+    new_cell.vertex_id = out_node_id;
+    new_cell.diag = new_diag;
     _vertices_data->activate_vertex(new_cell.vertex_id);
-
-    // Store jump and metadata
     bool valid_diag = _vertices_data->valid_diagonal<Cell::Matrix::I>(new_cell.vertex_id, new_cell.diag);
-    if (valid_diag) { // Extend only if it has not yet been visited
+    // Extend only if it has not yet been visited
+    if (valid_diag) {
       int pos_new_cell = _beyond_scope->i_jumps_wf().size();
       _beyond_scope->i_jumps_wf().push_back(new_cell);
       _vertices_data->get_vertex_data(new_cell.vertex_id)._i_jumps_positions[pos_score].push_back(pos_new_cell);
-
       // If the destination vertex is empty, jump again
-      if (curr_v->value.size() == 0) {
-        store_I_jump(curr_v, _beyond_scope->i_jumps_wf()[pos_new_cell], prev_pos, Cell::Matrix::IJumps);
+      if (curr_node.sequence.empty()) {
+        store_I_jump(curr_node, _beyond_scope->i_jumps_wf()[pos_new_cell], prev_pos, Cell::Matrix::IJumps);
       }
     }
   }
@@ -514,14 +504,14 @@ void TheseusAlignerImpl::store_I_jump(Graph::vertex* curr_v,
 
 
 // Check and store I jumps (that is, those diagonals that have reached the last column of a vertex)
-void TheseusAlignerImpl::check_and_store_jumps(Graph::vertex *curr_v,
-                                               Cell::CellVector &curr_wavefront,
-                                               Scope::range cell_range)
+void TheseusAlignerImpl::check_and_store_jumps(
+    NodeView curr_node,
+    Cell::CellVector &curr_wavefront,
+    Scope::range cell_range)
 {
-
-  Cell::pos_t len = cell_range.end - cell_range.start, diag, offset, curr_j, n = curr_v->value.size(), prev_pos;
+  Cell::pos_t len = cell_range.end - cell_range.start, diag, offset, curr_j, n = curr_node.sequence.size(), prev_pos;
   Cell::Matrix from_matrix;
-
+  // Check all difaonals in the current wavefront
   for (int l = 0; l < len; ++l) {
     diag = curr_wavefront[cell_range.start + l].diag;
     offset = curr_wavefront[cell_range.start + l].offset;
@@ -529,66 +519,74 @@ void TheseusAlignerImpl::check_and_store_jumps(Graph::vertex *curr_v,
     if (curr_j == n && offset <= _seq.size()) {
       from_matrix = curr_wavefront[cell_range.start + l].from_matrix;
       prev_pos = curr_wavefront[cell_range.start + l].prev_pos;
-      store_M_jump(curr_v, curr_wavefront[cell_range.start + l], prev_pos, from_matrix);
-      store_I_jump(curr_v, curr_wavefront[cell_range.start + l], prev_pos, from_matrix);
+      store_M_jump(curr_node, curr_wavefront[cell_range.start + l], prev_pos, from_matrix);
+      store_I_jump(curr_node, curr_wavefront[cell_range.start + l], prev_pos, from_matrix);
     }
   }
 }
 
 
 // Compute the Longest Common Prefix between two given sequences
-void TheseusAlignerImpl::LCP(std::string_view query,
-                             std::string &vertex_text,
-                             int &offset,
-                             int &j) {
-
-    // Find LCP
-    int len_seq_1 = query.size();
-    int len_seq_2 = vertex_text.size();
-    while (offset < len_seq_1 && j < len_seq_2 && query[offset] == vertex_text[j]) {
-        offset = offset + 1;   // Update the f.r. of this diagonal
-        j = j + 1;
-    }
+void TheseusAlignerImpl::LCP(
+    NodeView &curr_node,
+    int &offset,
+    int &j)
+{
+  // Find LCP
+  int len_seq_1 = _seq.size();
+  int len_seq_2 = curr_node.sequence.size();
+  // std::cout << query[offset] << " " << curr_node.sequence[j] << std::endl;
+  while (offset < len_seq_1 && j < len_seq_2 && _seq[offset] == curr_node.sequence[j]) {
+    offset = offset + 1;   // Update the f.r. of this diagonal
+    j = j + 1;
+  }
 }
 
 
 // TODO: Implement different end conditions as Global, Semi-Global...
-void TheseusAlignerImpl::check_end_condition(Cell curr_data, // Offset and prev_index
-                        int j,
-                        int v) {
-
-  int j_end = _graph._vertices[v].value.size(); // The last node is empty
-  if (!_is_msa && curr_data.offset == _seq.size()) {
+void TheseusAlignerImpl::check_end_condition(
+    Cell curr_data)
+{
+  if (curr_data.offset == _seq.size()) {
     _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
     _start_pos = curr_data;
   }
-  else if (_is_msa && curr_data.offset == _seq.size()) {
-  // else if (_is_msa && curr_data.offset == _seq.size() && v == _end_vertex && j == j_end) { // End condition global alignment
-    _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
-    _start_pos = curr_data;
-  }
+  // if (!_is_msa && curr_data.offset == _seq.size()) {
+  // }
+  // else if (_is_msa && curr_data.offset == _seq.size()) {
+  // // else if (_is_msa && curr_data.offset == _seq.size() && v == _end_vertex && j == j_end) { // End condition global alignment
+  //   _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
+  //   _start_pos = curr_data;
+  // }
 }
 
 
 // Extend a particular diagonal
 void TheseusAlignerImpl::extend_diagonal(
-    Graph::vertex *curr_v,
+    NodeId curr_node_id,
     Cell &curr_cell,
-    int v,
     Cell &prev_cell,
     Cell::pos_t prev_pos,
-    Cell::Matrix from_matrix) {
-
+    Cell::Matrix from_matrix)
+{
   // Longest Common prefix
+  NodeView curr_node = get_node(curr_node_id);
   int j = curr_cell.diag + curr_cell.offset;
-  LCP(_seq, curr_v->value, curr_cell.offset, j); // Find Longest Common Prefix
-
+  LCP(curr_node, curr_cell.offset, j);
   // End condition
-  check_end_condition(curr_cell, j, v); // Check end condition
-
-  // Check jump
-  if (j == curr_v->value.size() && curr_cell.offset <= _seq.size() && curr_v->out_edges.size() > 0) {
-    store_M_jump(curr_v, prev_cell, prev_pos, from_matrix); // Store the jump in neighbours
+  check_end_condition(curr_cell);
+  // _graph.print_graph();
+  // std::cout << "curr_node_id: " << curr_node_id << ", offset: " << curr_cell.offset 
+  //           << ", diag: " << curr_cell.diag << ", j: " << j 
+  //           << ", seq_size: " << _seq.size() << ", node_size: " << curr_node.sequence.size()
+  //           << ", has_out: " << has_out_nodes(curr_node_id)
+  //           << ", cond1 (j==node_size): " << (j == curr_node.sequence.size())
+  //           << ", cond2 (offset<=seq_size): " << (curr_cell.offset <= _seq.size())
+  //           << ", cond3 (has_out): " << has_out_nodes(curr_node_id)
+  //           << ", all_true: " << (j == curr_node.sequence.size() && curr_cell.offset <= _seq.size() && has_out_nodes(curr_node_id))
+  //           << std::endl;
+  if (j == curr_node.sequence.size() && curr_cell.offset <= _seq.size() && has_out_nodes(curr_node_id)) {
+    store_M_jump(curr_node, prev_cell, prev_pos, from_matrix); // Store the jump in neighbours
   }
 }
 
@@ -596,8 +594,8 @@ void TheseusAlignerImpl::extend_diagonal(
 // Add matches to our backtracking vector
 void TheseusAlignerImpl::add_matches(
     int start_matches,
-    int end_matches) {
-
+    int end_matches)
+{
   int size = end_matches - start_matches;
   for (int k = 0; k < size; ++k) {
     _alignment.edit_op.push_back('M');
@@ -627,45 +625,46 @@ void TheseusAlignerImpl::add_deletion()
 
 
 void TheseusAlignerImpl::one_backtrace_step(
-    Cell &curr_cell) {
-
-  // Get previous cell
-  // _score -= curr_cell.score_diff;
+    Cell &curr_cell)
+{
   Cell prev_cell;
   if (curr_cell.from_matrix == Cell::Matrix::M) prev_cell = _beyond_scope->m_wf()[curr_cell.prev_pos];
   else if (curr_cell.from_matrix == Cell::Matrix::MJumps) prev_cell = _beyond_scope->m_jumps_wf()[curr_cell.prev_pos];
   else prev_cell = _beyond_scope->i_jumps_wf()[curr_cell.prev_pos];
-
-  // Inside the same vertex or jump
   int num_indels;
+  // We are inside the same vertex
   if (curr_cell.vertex_id == prev_cell.vertex_id) { // Still in the same vertex
-    if (curr_cell.diag == prev_cell.diag) {                                               // Mismatch
+    // Mismatch
+    if (curr_cell.diag == prev_cell.diag) {
       if (curr_cell.offset > prev_cell.offset) {    // Consider 0 length vertices
         add_matches(prev_cell.offset + 1, curr_cell.offset);
         add_mismatch();
       }
     }
-    else { // Indel
-      if (curr_cell.diag < prev_cell.diag) {                                              // Deletion
+    else {
+      // Deletion
+      if (curr_cell.diag < prev_cell.diag) {
         num_indels = prev_cell.diag - curr_cell.diag;
         add_matches(prev_cell.offset + num_indels, curr_cell.offset);
         for (int l = 0; l < num_indels; ++l) add_deletion();
       }
-      else {                                                                              // Insertion
+      // Insertion
+      else {
         num_indels = curr_cell.diag - prev_cell.diag;
         add_matches(prev_cell.offset, curr_cell.offset);
         for (int l = 0; l < num_indels; ++l) add_insertion();
       }
     }
   }
-  else {                                            // Jump
+  // Jump to another vertex
+  else {
     add_matches(prev_cell.offset, curr_cell.offset);                          // Add the necessary matches
     _alignment.path.push_back(prev_cell.vertex_id);                           // Add the new vertex to the path
     int col_in_prev_v = prev_cell.diag + prev_cell.offset;
-    int num_insertions = _graph._vertices[prev_cell.vertex_id].value.size() - col_in_prev_v;
+    int num_insertions = _graph.node_size(prev_cell.vertex_id) - col_in_prev_v;
     for (int l = 0; l < num_insertions; ++l) add_insertion();                 // Add the necessary insertions
   }
-
+  // Update current cell
   curr_cell = prev_cell;
 }
 
@@ -673,35 +672,90 @@ void TheseusAlignerImpl::one_backtrace_step(
 // Main function of the backtracking process
 void TheseusAlignerImpl::backtrace()
 {
-
   Cell curr_pos = _start_pos;
   _alignment.start_offset = _start_offset;
   _alignment.end_offset = curr_pos.diag + curr_pos.offset; // Vertex offset = j
   _alignment.path.push_back(curr_pos.vertex_id);
+  // Main backtrace loop
   while (curr_pos.prev_pos != -1)
   {
     one_backtrace_step(curr_pos);
   }
-
-  add_matches(0, curr_pos.offset); // Add the matches until the beginning of the sequence
-
-  std::reverse(_alignment.edit_op.begin(), _alignment.edit_op.end());
-  std::reverse(_alignment.path.begin(), _alignment.path.end());
+  // Add the matches until the beginning of the sequence
+  add_matches(0, curr_pos.offset);
+  // Reverse path and edit operations
+  if (!_reversed_alignment) {
+    std::reverse(_alignment.edit_op.begin(), _alignment.edit_op.end());
+    std::reverse(_alignment.path.begin(), _alignment.path.end());
+  }
 }
 
 
 // Output functions
+/**
+ * @brief Visualize the graph in Graphviz format.
+ *
+ * @param G
+ */
+void TheseusAlignerImpl::print_code_graphviz_internal(std::ofstream &out_stream)
+{
+    out_stream << "digraph G {" << std::endl;
+    // Print nodes
+    for (NodeId id : _graph.nodes())
+    {
+      NodeView node = get_node(id);
+      out_stream << id << " [label=\"";
+      for (int j = 0; j < node.sequence.size(); ++j)
+      {
+          out_stream << node.sequence[j];
+      }
+      out_stream << "\"]" << std::endl;
+    }
+    // Print edges
+    for (NodeId id : _graph.nodes())
+    {
+      auto node = get_node(id);
+      for (NodeId out_id : node.out_nodes)
+      {
+        out_stream << id << "->" << out_id << std::endl;
+      }
+    }
+    out_stream << "}" << std::endl;
+}
+void TheseusAlignerImpl::print_code_graphviz(std::ofstream &out_stream) {
+  print_code_graphviz_internal(out_stream);
+}
+
 // Print as GFA
-void TheseusAlignerImpl::print_as_gfa(std::ofstream &out_stream) {
-  _graph.print_as_gfa(out_stream);
+void TheseusAlignerImpl::print_as_gfa_internal(
+  std::ofstream &gfa_output)
+{
+    if (!gfa_output.is_open()) throw std::runtime_error("Could not open output file");
+    // Print all nodes as Segments
+    for (NodeId id : _graph.nodes())
+    {
+      NodeView node = get_node(id);
+      gfa_output << "S\t" << id << "\t" << node.sequence << "\n";
+    }
+    // Print all edges as Links
+    for (NodeId id : _graph.nodes())
+    {
+      NodeView node = get_node(id);
+      // Go through all incoming vertices (with this you cover all possible edges,
+      // since the graph is directed)
+      for (const auto in_node : node.in_nodes)
+      {
+        gfa_output << "L\t" << in_node << "\t+\t"
+          << id << "\t+\t" << "0M\n";
+      }
+    }
+    gfa_output.close();
 }
-
-
-// Print in dot format
-void TheseusAlignerImpl::print_as_dot(std::ofstream &out_stream) {
-  _graph.print_code_graphviz(out_stream);
+// TODO: Using node names?
+void TheseusAlignerImpl::print_as_gfa(std::ofstream &gfa_output)
+{
+  print_as_gfa_internal(gfa_output);
 }
-
 
 // Print as msa (can only call from TheseusMSA)
 void TheseusAlignerImpl::print_as_msa(std::ofstream &out_stream) {
@@ -730,7 +784,8 @@ std::string TheseusAlignerImpl::get_consensus_sequence() {
 void TheseusAlignerImpl::print_as_gaf(
     theseus::Alignment &alignment,
     std::ostream &out_stream,
-    std::string seq_name) {
+    std::string seq_name,
+    std::unordered_map<NodeId, std::string> &node_names) {
 
   // Field 1: Query name
   out_stream << seq_name;
@@ -750,13 +805,14 @@ void TheseusAlignerImpl::print_as_gaf(
   // Field 6: Alignment path
   out_stream << "\t";
   for (int l = 0; l < alignment.path.size(); ++l) {
-    out_stream << ">" << _graph._vertices[alignment.path[l]].name; // TODO: Support orientation
+    out_stream << ">" << node_names.at(alignment.path[l]); // TODO: Support orientation
   }
 
   // Field 7: Target length
   int target_length = 0;
   for (int l = 0; l < alignment.path.size(); ++l) {
-    target_length += _graph._vertices[alignment.path[l]].value.size();
+    int node_length = node_names.at(alignment.path[l]).size();
+    target_length += node_length;
   }
   out_stream << "\t" << target_length;
 

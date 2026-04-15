@@ -32,36 +32,22 @@
 
 namespace theseus {
 
+using NodeId = Graph::NodeId;
+
 TheseusMSA::TheseusMSA(const Penalties &penalties,
                        const Heuristics &heuristics,
                        std::string_view seq) {
 
     // Create the initial graph
     theseus::Graph G;
-    theseus::Graph::vertex source_v, central_v, sink_v;
-    Graph::edge source_edge, central_edge;
-
-    // Source vertex
-    source_edge.from_vertex = 0;
-    source_edge.to_vertex = 1;
-    source_v.out_edges.push_back(source_edge);
-    source_v.first_poa_vtx = 0;
-    G._vertices.push_back(source_v);
-
-    // Central vertex (initial sequence)
-    central_edge.from_vertex = 1;
-    central_edge.to_vertex = 2;
-    central_v.in_edges.push_back(source_edge);
-    central_v.out_edges.push_back(central_edge);
-    central_v.first_poa_vtx = 1;
-    central_v.value = seq;
-    G._vertices.push_back(central_v);
-
-    // Sink vertex
-    sink_v.in_edges.push_back(central_edge);
-    sink_v.first_poa_vtx = seq.size() + 1;
-    G._vertices.push_back(sink_v);
-
+    // Add nodes
+    NodeId source_node_id = G.add_node("");
+    NodeId central_node_id = G.add_node(seq);
+    NodeId sink_node_id = G.add_node("");
+    // Add edges
+    G.add_edge(source_node_id, central_node_id);
+    G.add_edge(central_node_id, sink_node_id);
+    // Construct the aligner implementation
     msa_aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(G), true);
 }
 
@@ -80,10 +66,11 @@ TheseusMSA::~TheseusMSA() {}
  * @return Alignment
  */
 Alignment TheseusMSA::align(
-    std::string_view seq) {
+    std::string_view seq,
+    bool reverse_alignment) {
 
-    std::string start_node;
-    return msa_aligner_impl_->align(seq, start_node, 0);
+    NodeId start_node;
+    return msa_aligner_impl_->align(seq, start_node, 0, reverse_alignment);
 }
 
 /**
@@ -115,7 +102,7 @@ std::string TheseusMSA::get_consensus_sequence() {
  *
  */
 void TheseusMSA::print_as_dot(std::ofstream &out_stream) {
-    msa_aligner_impl_->print_as_dot(out_stream);
+    msa_aligner_impl_->print_code_graphviz(out_stream);
 }
 
 } // namespace theseus

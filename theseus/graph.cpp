@@ -1,124 +1,489 @@
-/*
- *                             The MIT License
- *
- * Copyright (c) 2024 by Albert Jimenez-Blanco
- *
- * This file is part of #################### Theseus Library ####################.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- */
+#include "../include/theseus/graph.h"
 
-
-#include <vector>
+#include <algorithm>
 #include <string>
-
-#include "graph.h"
-#include "gfa_graph.h"
+#include <vector>
+#include <ranges>
 
 namespace theseus {
-    // Constructor from GFA stream
-    Graph::Graph(std::istream &gfa_stream) {
-        GfaGraph gfa_graph(gfa_stream);
 
-        // Add nodes
-        _vertices.reserve(gfa_graph.gfa_nodes.size());
-        for (int i = 0; i < gfa_graph.gfa_nodes.size(); ++i) {
-            vertex v;
-            v.name = gfa_graph.gfa_nodes[i].name;
-            v.value = gfa_graph.gfa_nodes[i].seq;
-            _vertices.push_back(v);
+class GraphImpl {
+public:
+    using NodeId = Graph::NodeId;
+    using NodeView = Graph::NodeView;
+    using NodeIdRange = Graph::NodeIdRange;
+
+    /*
+     * Forward iterator for alive nodes in the graph. This iterator skips over
+     * nodes that have been removed (i.e., marked as not alive) from the graph.
+     */
+    class AliveNodeIterator {
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = NodeId;
+        using difference_type = std::ptrdiff_t;
+        using pointer = const NodeId *;
+        using reference = const NodeId &;
+
+        AliveNodeIterator(const GraphImpl *graph, NodeId current)
+            : graph_(graph), current_(current) {
+            advance_to_alive();
         }
 
-        // Add edges
-        for (int i = 0; i < gfa_graph.gfa_edges.size(); ++i) {
-            edge e;
-            e.from_vertex = gfa_graph.gfa_edges[i].from_node;
-            e.to_vertex = gfa_graph.gfa_edges[i].to_node;
-            e.overlap = gfa_graph.gfa_edges[i].overlap;
-            _vertices[e.from_vertex].out_edges.push_back(e);
-            _vertices[e.to_vertex].in_edges.push_back(e);
+        reference operator*() const { return current_; }
+        pointer operator->() const { return &current_; }
+
+        AliveNodeIterator &operator++() {
+            ++current_;
+            advance_to_alive();
+            return *this;
         }
 
-        // Create name to id mapping
-        for (int i = 0; i < _vertices.size(); ++i) {
-            name_to_id_[_vertices[i].name] = i;
+        AliveNodeIterator operator++(int) {
+            AliveNodeIterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        bool operator==(const AliveNodeIterator &other) const {
+            return graph_ == other.graph_ && current_ == other.current_;
+        }
+
+    private:
+        void advance_to_alive() {
+            while (current_ < graph_->nodes_.size() && !graph_->nodes_[current_].alive) {
+                ++current_;
+            }
+        }
+
+        const GraphImpl *graph_;
+        NodeId current_;
+    };
+
+    /**
+     * Copy the contents of another GraphImpl into this one. Explicit function
+     * instead of copy constructor/assignment operator used by Graph.
+     *
+     * @param other The GraphImpl to copy from.
+     */
+    void copy_from(const GraphImpl& other) {
+        nodes_ = other.nodes_;
+        free_node_ids_ = other.free_node_ids_;
+        source_nodes_ = other.source_nodes_;
+        sink_nodes_ = other.sink_nodes_;
+    }
+
+    NodeId add_node(std::string_view sequence) {
+        return add_node(std::string(sequence));
+    }
+
+    NodeId add_node(std::string&& sequence) {
+        NodeId id = 0;
+
+        if (!free_node_ids_.empty()) {
+            id = free_node_ids_.back();
+            free_node_ids_.pop_back();
+
+            nodes_[id].sequence = std::move(sequence);
+            nodes_[id].alive = true;
+        }
+        else {
+            id = nodes_.size();
+
+            nodes_.emplace_back(Node{std::move(sequence), {}, {}, true});
+        }
+
+        source_nodes_.push_back(id);
+        sink_nodes_.push_back(id);
+
+        return id;
+    }
+
+    void expand_sequence(NodeId id, std::string_view suffix) {
+        if (!is_valid_node(id)) {
+            throw Graph::InvalidNodeException(id);
+        }
+
+        nodes_[id].sequence.append(suffix);
+    }
+
+    std::string split_sequence(NodeId id, size_t idx) {
+        if (!is_valid_node(id)) {
+            throw Graph::InvalidNodeException(id);
+        }
+
+        std::string new_seq = nodes_[id].sequence.substr(idx);
+        nodes_[id].sequence.resize(idx);
+
+        return new_seq;
+    }
+
+    void remove_node(NodeId id) {
+        if (!is_valid_node(id)) {
+            throw Graph::InvalidNodeException(id);
+        }
+
+        if (is_source(id)) {
+            remove_id_from_vec(source_nodes_, id);
+        }
+
+        if (is_sink(id)) {
+            remove_id_from_vec(sink_nodes_, id);
+        }
+
+        for (NodeId out_id : nodes_[id].out_nodes) {
+            remove_id_from_vec(nodes_[out_id].in_nodes, id);
+        }
+
+        for (NodeId in_id : nodes_[id].in_nodes) {
+            remove_id_from_vec(nodes_[in_id].out_nodes, id);
+        }
+
+        nodes_[id].sequence.clear();
+        nodes_[id].in_nodes.clear();
+        nodes_[id].out_nodes.clear();
+        nodes_[id].alive = false;
+
+        free_node_ids_.push_back(id);
+    }
+
+    void add_edge(NodeId from, NodeId to) {
+        if (!is_valid_node(from)) {
+            throw Graph::InvalidNodeException(from);
+        }
+        if (!is_valid_node(to)) {
+            throw Graph::InvalidNodeException(to);
+        }
+
+        nodes_[from].out_nodes.push_back(to);
+        nodes_[to].in_nodes.push_back(from);
+
+        remove_id_from_vec(source_nodes_, to);
+        remove_id_from_vec(sink_nodes_, from);
+    }
+
+    bool remove_edge(NodeId from, NodeId to) {
+        if (!is_valid_node(from)) {
+            throw Graph::InvalidNodeException(from);
+        }
+        if (!is_valid_node(to)) {
+            throw Graph::InvalidNodeException(to);
+        }
+
+        bool removed = remove_id_from_vec(nodes_[from].out_nodes, to);
+        if (removed) {
+            remove_id_from_vec(nodes_[to].in_nodes, from);
+
+            if (nodes_[from].out_nodes.empty()) {
+                sink_nodes_.push_back(from);
+            }
+            if (nodes_[to].in_nodes.empty()) {
+                source_nodes_.push_back(to);
+            }
+        }
+
+        return removed;
+    }
+
+    void remove_out_edges(NodeId from) {
+        if (!is_valid_node(from)) {
+            throw Graph::InvalidNodeException(from);
+        }
+
+        for (NodeId to : nodes_[from].out_nodes) {
+            remove_id_from_vec(nodes_[to].in_nodes, from);
+
+            if (nodes_[to].in_nodes.empty()) {
+                source_nodes_.push_back(to);
+            }
+        }
+
+        nodes_[from].out_nodes.clear();
+
+        if (!is_sink(from)) {
+            sink_nodes_.push_back(from);
         }
     }
 
-    // Constructor from handle graph
-    Graph::Graph(const handlegraph::HandleGraph &handle_graph) {
-        // Add nodes
-        handle_graph.for_each_handle([&](const handlegraph::handle_t& h) {
-            // Forward orientation
-            vertex v;
-            v.name = std::to_string(handle_graph.get_id(h)); // Use the handle id as the name of the vertex
-            v.value = handle_graph.get_sequence(h);
-            _vertices.push_back(v);
-
-            // Reverse orientation
-            const handlegraph::handle_t& h_rev = handle_graph.flip(h);
-            v.name = std::to_string(handle_graph.get_id(h_rev));
-            v.value = handle_graph.get_sequence(h_rev);
-            _vertices.push_back(v);
-        });
-
-        // Create name to id mapping
-        for (int i = 0; i < _vertices.size(); ++i) {
-            name_to_id_[_vertices[i].name] = i;
+    void remove_in_edges(NodeId to) {
+        if (!is_valid_node(to)) {
+            throw Graph::InvalidNodeException(to);
         }
 
-        // Add edges
-        handle_graph.for_each_edge([&](const handlegraph::edge_t& e) {
-            // Forward orientation
-            edge edge_fwd;
-            std::string from_handle_name = std::to_string(handle_graph.get_id(e.first));
-            std::string to_handle_name   = std::to_string(handle_graph.get_id(e.second));
-            int from_vertex_id = name_to_id_.at(from_handle_name);
-            int to_vertex_id   = name_to_id_.at(to_handle_name);
-            // Check that the vertices exist in the graph
-            if (from_vertex_id == -1 || to_vertex_id == -1) {
-                std::cerr << "Error: Vertex not found in the graph for edge (" << from_handle_name << " -> " << to_handle_name << ")" << std::endl;
-                return;
-            }
-            edge_fwd.from_vertex = from_vertex_id;
-            edge_fwd.to_vertex   = to_vertex_id;
-            edge_fwd.overlap     = 0; // TODO: Now we suppose that overlap is 0
-            _vertices[edge_fwd.from_vertex].out_edges.push_back(edge_fwd);
-            _vertices[edge_fwd.to_vertex].in_edges.push_back(edge_fwd);
+        for (NodeId from : nodes_[to].in_nodes) {
+            remove_id_from_vec(nodes_[from].out_nodes, to);
 
-            // Reverse orientation
-            edge edge_rev;
-            std::string rev_from_handle_name = std::to_string(handle_graph.get_id(handle_graph.flip(e.second)));
-            std::string rev_to_handle_name   = std::to_string(handle_graph.get_id(handle_graph.flip(e.first)));
-            int rev_from_vertex_id = name_to_id_.at(rev_from_handle_name);
-            int rev_to_vertex_id   = name_to_id_.at(rev_to_handle_name);
-            // Check that the vertices exist in the graph
-            if (rev_from_vertex_id == -1 || rev_to_vertex_id == -1) {
-                std::cerr << "Error: Vertex not found in the graph for reverse edge (" << rev_from_handle_name << " -> " << rev_to_handle_name << ")" << std::endl;
-                return;
+            if (nodes_[from].out_nodes.empty()) {
+                sink_nodes_.push_back(from);
             }
-            edge_rev.from_vertex = rev_from_vertex_id;
-            edge_rev.to_vertex   = rev_to_vertex_id;
-            edge_rev.overlap     = 0; // TODO: Now we suppose that overlap is 0
-            _vertices[edge_rev.from_vertex].out_edges.push_back(edge_rev);
-            _vertices[edge_rev.to_vertex].in_edges.push_back(edge_rev);
-        });
+        }
+
+        nodes_[to].in_nodes.clear();
+
+        if (!is_source(to)) {
+            source_nodes_.push_back(to);
+        }
     }
+
+    void substitute_out_edges(NodeId orig_from, NodeId new_from) {
+        if (!is_valid_node(orig_from)) {
+            throw Graph::InvalidNodeException(orig_from);
+        }
+        if (!is_valid_node(new_from)) {
+            throw Graph::InvalidNodeException(new_from);
+        }
+
+        for (NodeId to : nodes_[orig_from].out_nodes) {
+            remove_id_from_vec(nodes_[to].in_nodes, orig_from);
+            nodes_[to].in_nodes.push_back(new_from);
+        }
+
+        nodes_[new_from].out_nodes = std::move(nodes_[orig_from].out_nodes);
+        nodes_[orig_from].out_nodes.clear();
+
+        if (!is_sink(orig_from)) {
+            sink_nodes_.push_back(orig_from);
+        }
+        if (!nodes_[new_from].out_nodes.empty()) {
+            remove_id_from_vec(sink_nodes_, new_from);
+        }
+    }
+
+    void substitute_in_edges(NodeId orig_to, NodeId new_to) {
+        if (!is_valid_node(orig_to)) {
+            throw Graph::InvalidNodeException(orig_to);
+        }
+        if (!is_valid_node(new_to)) {
+            throw Graph::InvalidNodeException(new_to);
+        }
+
+        for (NodeId from : nodes_[orig_to].in_nodes) {
+            remove_id_from_vec(nodes_[from].out_nodes, orig_to);
+            nodes_[from].out_nodes.push_back(new_to);
+        }
+
+        nodes_[new_to].in_nodes = std::move(nodes_[orig_to].in_nodes);
+        nodes_[orig_to].in_nodes.clear();
+
+        if (!is_source(orig_to)) {
+            source_nodes_.push_back(orig_to);
+        }
+        if (!nodes_[new_to].in_nodes.empty()) {
+            remove_id_from_vec(source_nodes_, new_to);
+        }
+    }
+
+    NodeView node(NodeId id) const {
+        if (!is_valid_node(id)) {
+            throw Graph::InvalidNodeException(id);
+        }
+
+        const auto &node = nodes_[id];
+        return {
+            Graph::SequenceView(node.sequence, false),
+            Graph::NodeIdRange(node.in_nodes.cbegin(), node.in_nodes.cend()),
+            Graph::NodeIdRange(node.out_nodes.cbegin(), node.out_nodes.cend()),
+        };
+    }
+
+    NodeView node_rev(NodeId id) const {
+        if (!is_valid_node(id)) {
+            throw Graph::InvalidNodeException(id);
+        }
+
+        const auto &node = nodes_[id];
+        return {
+            Graph::SequenceView(node.sequence, true),
+            Graph::NodeIdRange(node.out_nodes.cbegin(), node.out_nodes.cend()),
+            Graph::NodeIdRange(node.in_nodes.cbegin(), node.in_nodes.cend()),
+        };
+    }
+
+    size_t nnodes() const {
+        return nodes_.size() - free_node_ids_.size();
+    }
+
+    NodeIdRange nodes() const {
+        return NodeIdRange(AliveNodeIterator(this, 0),
+                           AliveNodeIterator(this, nodes_.size()));
+    }
+
+    bool is_source(NodeId id) const {
+        if (!is_valid_node(id)) {
+            throw Graph::InvalidNodeException(id);
+        }
+
+        return nodes_[id].in_nodes.empty();
+    }
+
+    bool is_sink(NodeId id) const {
+        if (!is_valid_node(id)) {
+            throw Graph::InvalidNodeException(id);
+        }
+        return nodes_[id].out_nodes.empty();
+    }
+
+    int node_size(NodeId id) const {
+        if (!is_valid_node(id)) {
+            throw Graph::InvalidNodeException(id);
+        }
+        return nodes_[id].sequence.size();
+    }
+
+    NodeIdRange source_nodes() const {
+        return NodeIdRange(source_nodes_.cbegin(), source_nodes_.cend());
+    }
+
+    NodeIdRange sink_nodes() const {
+        return NodeIdRange(sink_nodes_.cbegin(), sink_nodes_.cend());
+    }
+
+    void print_graph() {
+        std::cout << "\\begin{tikzpicture}[\n";
+        std::cout << "  >=stealth,\n";
+        std::cout << "  every node/.style={draw, rounded corners, minimum height=8mm, font=\\ttfamily\\small}\n";
+        std::cout << "]\n";
+
+        for (int i = 0; i < nodes_.size(); ++i) {
+            auto node = nodes_[i];
+            std::cout << "  \\node (n" << i << ") at (" << (i * 3) << ",0) {" << i << ": " << node.sequence << "};\n";
+        }
+
+        for (int i = 0; i < nodes_.size(); ++i) {
+            auto node = nodes_[i];
+            for (auto out_id : node.out_nodes) {
+                std::cout << "  \\draw[->] (n" << i << ") -- (n" << out_id << ");\n";
+            }
+        }
+
+        std::cout << "\\end{tikzpicture}\n";
+    }
+
+private:
+    struct Node {
+        std::string sequence;
+        std::vector<NodeId> in_nodes;
+        std::vector<NodeId> out_nodes;
+        bool alive;
+    };
+
+    std::vector<Node> nodes_;
+
+    std::vector<NodeId> free_node_ids_;
+
+    std::vector<NodeId> source_nodes_;
+    std::vector<NodeId> sink_nodes_;
+
+    /**
+     * Remove the given id from the vector if it exists. Avoid dynamic allocations
+     * by swapping the id to remove with the last element and popping the back.
+     *
+     * @param vec The vector from which to remove the id.
+     * @param id The id to remove.
+     * @return true if the id was found and removed, false otherwise.
+     */
+    static bool remove_id_from_vec(std::vector<NodeId> &vec, NodeId id) {
+        auto it = std::find(vec.begin(), vec.end(), id);
+        if (it != vec.end()) {
+            *it = vec.back();
+            vec.pop_back();
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Check if the given NodeId corresponds to a valid node in the graph.
+     *
+     * @param id The NodeId to check.
+     * @return true if the NodeId is valid, false otherwise.
+     */
+    bool is_valid_node(NodeId id) const {
+        return id < nodes_.size() && nodes_[id].alive;
+    }
+};
+
+Graph::Graph() : impl_(std::make_unique<GraphImpl>()) {}
+
+Graph::~Graph() = default;
+
+Graph::Graph(const Graph& other) : impl_(std::make_unique<GraphImpl>()) {
+    impl_->copy_from(*other.impl_);
 }
+
+Graph& Graph::operator=(const Graph& other) {
+    if (this != &other) {
+        impl_->copy_from(*other.impl_);
+    }
+    return *this;
+}
+
+Graph::Graph(Graph&&) noexcept = default;
+
+Graph& Graph::operator=(Graph&&) noexcept = default;
+
+void Graph::swap(Graph& other) noexcept {
+    impl_.swap(other.impl_);
+}
+
+Graph::NodeId Graph::add_node(std::string_view sequence) {
+    return impl_->add_node(sequence);
+}
+
+Graph::NodeId Graph::add_node(const char *sequence) {
+    return impl_->add_node(std::string_view(sequence));
+}
+
+Graph::NodeId Graph::add_node(std::string &&sequence) {
+    return impl_->add_node(std::move(sequence));
+}
+
+void Graph::expand_sequence(Graph::NodeId id, std::string_view suffix) {
+    impl_->expand_sequence(id, suffix);
+}
+
+std::string Graph::split_sequence(NodeId id, size_t idx) {
+    return impl_->split_sequence(id, idx);
+}
+
+void Graph::remove_node(NodeId id) { impl_->remove_node(id); }
+
+void Graph::add_edge(NodeId from, NodeId to) { impl_->add_edge(from, to); }
+
+bool Graph::remove_edge(NodeId from, NodeId to) {
+    return impl_->remove_edge(from, to);
+}
+
+void Graph::remove_out_edges(NodeId from) { impl_->remove_out_edges(from); }
+
+void Graph::remove_in_edges(NodeId to) { impl_->remove_in_edges(to); }
+
+void Graph::substitute_out_edges(NodeId orig_from, NodeId new_from) {
+    impl_->substitute_out_edges(orig_from, new_from);
+}
+
+void Graph::substitute_in_edges(NodeId orig_to, NodeId new_to) {
+    impl_->substitute_in_edges(orig_to, new_to);
+}
+
+Graph::NodeView Graph::node(NodeId id) const { return impl_->node(id); }
+
+Graph::NodeView Graph::node_rev(NodeId id) const { return impl_->node_rev(id); }
+
+size_t Graph::nnodes() const { return impl_->nnodes(); }
+
+bool Graph::is_source(NodeId id) const { return impl_->is_source(id); }
+
+bool Graph::is_sink(NodeId id) const { return impl_->is_sink(id); }
+
+Graph::NodeIdRange Graph::nodes() const { return impl_->nodes(); }
+
+int Graph::node_size(NodeId id) const { return impl_->node_size(id); }
+
+Graph::NodeIdRange Graph::source_nodes() const { return impl_->source_nodes(); }
+
+Graph::NodeIdRange Graph::sink_nodes() const { return impl_->sink_nodes(); }
+
+void Graph::print_graph() { return impl_->print_graph(); }
+
+}  // namespace theseus

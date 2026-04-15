@@ -28,24 +28,31 @@
 
 #pragma once
 
+#include <iostream>
+#include <fstream>
 #include <vector>
 #include <string>
 #include <stack>
 #include <functional>
 
-#include "graph.h"
-#include "../include/theseus/alignment.h"
+#include "theseus/graph.h"
+#include "theseus/alignment.h"
 
 // Specific POA graph classes. Only used for MSA.
 namespace theseus {
+
+    using NodeId       = Graph::NodeId;
+    using NodeView     = Graph::NodeView;
+    using NodeIdRange  = Graph::NodeIdRange;
+    using SequenceView = Graph::SequenceView;
 
     class POAVertex {
         public:
             std::vector<int> associated_vtxs;   // Associated vertexes
             std::vector<int> in_edges;          // In-going vertices
             std::vector<int> out_edges;         // Out-going vertices
+            NodeId associated_node_compact;     // Corresponding node in the compact G graph
             char value;                         // Base pair in this vertex
-            int associated_vtx_compact;         // Corresponding vertex in the compact G graph
     };
 
     class POAEdge {
@@ -61,35 +68,8 @@ namespace theseus {
 
         std::vector<POAVertex> _poa_vertices;
         std::vector<POAEdge> _poa_edges;
+        std::vector<int> _first_poa_vtx; // For each vertex in the compacted graph, the first POA vertex associated to it
         int _end_vtx_poa;
-
-
-        /**
-         * @brief Update the compacted edges once a vertex has been split
-         *
-         * @param orig_from
-         * @param new_from
-         * @param compacted_G
-         */
-        void update_compact_out_edges(
-            int orig_from,
-            int new_from,
-            Graph &compacted_G) {
-
-            // The source is changed
-            for (int l = 0; l < compacted_G._vertices[new_from].out_edges.size(); ++l) {
-                // Update the out-edge
-                compacted_G._vertices[new_from].out_edges[l].from_vertex = new_from;
-                int to_vtx = compacted_G._vertices[new_from].out_edges[l].to_vertex;
-
-                // Update the in-edge
-                for (int k = 0; k < compacted_G._vertices[to_vtx].in_edges.size(); ++k) {
-                    if (compacted_G._vertices[to_vtx].in_edges[k].from_vertex == orig_from) {
-                        compacted_G._vertices[to_vtx].in_edges[k].from_vertex = new_from;
-                    }
-                }
-            }
-        }
 
 
         /**
@@ -102,122 +82,91 @@ namespace theseus {
         void split_vertices(
             int poa_source,
             int poa_destination,
-            Graph &compacted_G) {
-
-            // Update the data in the compacted graph
-            int source_v_compact = _poa_vertices[poa_source].associated_vtx_compact;
-            int destination_v_compact = _poa_vertices[poa_destination].associated_vtx_compact;
-            int pos_source = poa_source - compacted_G._vertices[source_v_compact].first_poa_vtx;
-            bool split_source = pos_source < (int)compacted_G._vertices[source_v_compact].value.size() - 1;
-            int pos_destination = poa_destination - compacted_G._vertices[destination_v_compact].first_poa_vtx;
+            Graph &compacted_G)
+        {
+            // Detect source and destination vertices in the compacted graph
+            NodeId source_v_compact = _poa_vertices[poa_source].associated_node_compact;
+            NodeId destination_v_compact = _poa_vertices[poa_destination].associated_node_compact;
+            // Detect positions and necessity of split
+            int pos_source = poa_source - _first_poa_vtx[source_v_compact];
+            bool split_source = pos_source < compacted_G.node_size(source_v_compact) - 1;
+            int pos_destination = poa_destination - _first_poa_vtx[destination_v_compact];
             bool split_destination = pos_destination > 0;
-
             if (source_v_compact == destination_v_compact && poa_source + 1 == poa_destination) {
                 return; // No need to split
             }
-
-            // Update source vertex
-            if (split_source) { // Split the source vertex
-                // SECOND PART
-                Graph::vertex new_vertex_compacted = compacted_G._vertices[source_v_compact];
-                Graph::edge new_edge;
-                new_vertex_compacted.in_edges.clear();
-                new_edge.from_vertex = source_v_compact;
-                new_edge.to_vertex = compacted_G._vertices.size();
-                new_vertex_compacted.in_edges.push_back(new_edge);
-                new_vertex_compacted.first_poa_vtx = poa_source + 1;
-                // Update the value
-                new_vertex_compacted.value.clear();
-                for (int l = pos_source + 1; l <= compacted_G._vertices[source_v_compact].value.size() - 1; ++l) {
-                    new_vertex_compacted.value.push_back(compacted_G._vertices[source_v_compact].value[l]);
-                    _poa_vertices[(poa_source - pos_source) + l].associated_vtx_compact = compacted_G._vertices.size();
+            // Update source node
+            if (split_source) {
+                // New node
+                int original_size  = compacted_G.node_size(source_v_compact);
+                std::string suffix = compacted_G.split_sequence(source_v_compact, pos_source + 1);
+                NodeId new_node_id = compacted_G.add_node(std::move(suffix));
+                // Update the new node
+                compacted_G.substitute_out_edges(source_v_compact, new_node_id);
+                _first_poa_vtx.push_back(poa_source + 1);
+                // Update the POA graph
+                for (int l = pos_source + 1; l < original_size; ++l) {
+                    _poa_vertices[(poa_source - pos_source) + l].associated_node_compact = new_node_id;
                 }
-                compacted_G._vertices.push_back(new_vertex_compacted);
-                // Update the edges
-                update_compact_out_edges(source_v_compact, compacted_G._vertices.size() - 1, compacted_G);
-
-                // FIRST PART
-                compacted_G._vertices[source_v_compact].out_edges.clear();
-                compacted_G._vertices[source_v_compact].out_edges.push_back(new_edge);
-                int size_seg = compacted_G._vertices[source_v_compact].value.size() - 1;
-                for (int l = size_seg; l > pos_source; --l) {
-                    compacted_G._vertices[source_v_compact].value.pop_back();
-                }
-
+                // Add the new edge
+                compacted_G.add_edge(source_v_compact, new_node_id);
+                // In case of self-node splitting gap, update destination_vtx
                 if (source_v_compact == destination_v_compact) {
-                    destination_v_compact = compacted_G._vertices.size() - 1;
-                    pos_destination = poa_destination - compacted_G._vertices[destination_v_compact].first_poa_vtx;
+                    destination_v_compact = new_node_id;
+                    pos_destination = poa_destination - _first_poa_vtx[new_node_id];
                 }
             }
-
             // Update destination vertex
-            if (split_destination) { // Split the destination vertex
-                // Second part
-                Graph::vertex new_vertex_compacted = compacted_G._vertices[destination_v_compact];
-                new_vertex_compacted.in_edges.clear();
-                Graph::edge new_edge;
-                new_edge.from_vertex = destination_v_compact;
-                new_edge.to_vertex = compacted_G._vertices.size();
-                new_vertex_compacted.in_edges.push_back(new_edge);
-                new_vertex_compacted.first_poa_vtx = poa_destination;
-                new_vertex_compacted.value.clear();
-                for (int l = pos_destination; l <= compacted_G._vertices[destination_v_compact].value.size() - 1; ++l) {
-                    new_vertex_compacted.value.push_back(compacted_G._vertices[destination_v_compact].value[l]);
-                    _poa_vertices[(poa_destination - pos_destination) + l].associated_vtx_compact = compacted_G._vertices.size();
+            if (split_destination) {
+                // New node
+                int original_size  = compacted_G.node_size(destination_v_compact);
+                std::string suffix = compacted_G.split_sequence(destination_v_compact, pos_destination);
+                NodeId new_node_id = compacted_G.add_node(std::move(suffix));
+                // Update the new node
+                compacted_G.substitute_out_edges(destination_v_compact, new_node_id);
+                _first_poa_vtx.push_back(poa_destination);
+                // Update the POA graph
+                for (int l = pos_destination; l < original_size; ++l) {
+                    _poa_vertices[(poa_destination - pos_destination) + l].associated_node_compact = new_node_id;
                 }
-                compacted_G._vertices.push_back(new_vertex_compacted);
-                // Update the edges
-                update_compact_out_edges(destination_v_compact, compacted_G._vertices.size() - 1, compacted_G);
-
-                // First part
-                compacted_G._vertices[destination_v_compact].out_edges.clear();
-                compacted_G._vertices[destination_v_compact].out_edges.push_back(new_edge);
-                int size_seg = compacted_G._vertices[destination_v_compact].value.size() - 1;
-                for (int l = size_seg; l >= pos_destination; --l) {
-                    compacted_G._vertices[destination_v_compact].value.pop_back();
-                }
-
+                // Add the new edge
+                compacted_G.add_edge(destination_v_compact, new_node_id);
                 // New destination vertex
-                destination_v_compact = compacted_G._vertices.size() - 1;
+                destination_v_compact = new_node_id;
             }
-
             // Add the new edge
-            Graph::edge new_edge;
-            new_edge.from_vertex = source_v_compact;
-            new_edge.to_vertex = destination_v_compact;
-            compacted_G._vertices[source_v_compact].out_edges.push_back(new_edge);
-            compacted_G._vertices[destination_v_compact].in_edges.push_back(new_edge);
+            compacted_G.add_edge(source_v_compact, destination_v_compact);
         }
 
 
         /**
          * @brief Update a vertex in the POA graph.
          *
-         * @param poa_v Vertex to update
-         * @param value
-         * @param new_vertex_exists
-         * @param G
+         * @param poa_v             Vertex to update
+         * @param new_node_id       Position of the new node in the compacted graph
+         * @param value             Value to add
+         * @param new_node_exists   Whether the node already exists or not in compacted_G
+         * @param compacted_G       The compacted graph
          */
         void update_poa_vertex(
             int &poa_v,
-            int &pos_new_vtx,
+            NodeId &new_node_id,
             char value,
-            bool &new_vertex_exists,
+            bool &new_node_exists,
             Graph &compacted_G)
         {
-
             // Check if the vertex already exists
             bool already_exists = false;
             int vtx;
             char vtx_value;
             for (int l = 0; l < _poa_vertices[poa_v].associated_vtxs.size(); ++l)
             {
-                vtx = _poa_vertices[poa_v].associated_vtxs[l];
+                vtx       = _poa_vertices[poa_v].associated_vtxs[l];
                 vtx_value = _poa_vertices[vtx].value;
                 if (value == vtx_value)
                 {
-                    already_exists = true;
-                    new_vertex_exists = false;
+                    already_exists    = true;
+                    new_node_exists   = false;
                     poa_v = vtx; // poa_v is the vertex that will be used when adding an edge
                 }
             }
@@ -226,7 +175,7 @@ namespace theseus {
             if (!already_exists)
             {
                 POAVertex new_vertex;
-                new_vertex.value = value;
+                new_vertex.value           = value;
                 new_vertex.associated_vtxs = _poa_vertices[poa_v].associated_vtxs;      // Associate it the necessary vertices
                 new_vertex.associated_vtxs.push_back(poa_v);                            // Add the vtx poa_v, as it is missing
                 _poa_vertices.push_back(new_vertex);
@@ -240,20 +189,18 @@ namespace theseus {
                 }
 
                 // Add a new vertex to the compacted graph
-                if (new_vertex_exists) {
+                if (new_node_exists) {
                     // Add a character to the existing vertex (the last one in compacted_G)
-                    compacted_G._vertices[pos_new_vtx].value.push_back(value);
-                    _poa_vertices[poa_v].associated_vtx_compact = pos_new_vtx;
+                    compacted_G.expand_sequence(new_node_id, std::string(1, value));
+                    _poa_vertices[poa_v].associated_node_compact = new_node_id;
                 }
                 else {
                     // Create a new vertex (the last one in compacted_G)
-                    Graph::vertex new_vertex_compacted;
-                    new_vertex_compacted.first_poa_vtx = poa_v;
-                    new_vertex_compacted.value.push_back(value);
-                    compacted_G._vertices.push_back(new_vertex_compacted);
-                    pos_new_vtx = compacted_G._vertices.size() - 1;
-                    _poa_vertices[poa_v].associated_vtx_compact = pos_new_vtx;
-                    new_vertex_exists = true;
+                    new_node_id = compacted_G.add_node(std::string(1, value));
+                    _first_poa_vtx.push_back(poa_v);
+                    // Update the poa graph
+                    _poa_vertices[poa_v].associated_node_compact = new_node_id;
+                    new_node_exists = true;
                 }
             }
         }
@@ -273,36 +220,33 @@ namespace theseus {
             int destination,
             int added_weight,
             int seq_ID,
-            Graph &compacted_G) {
-
-        // Check if the edge already exists
-        bool already_exists = false;
-        int curr_edge;
-        for (int l = 0; l < _poa_vertices[source].out_edges.size(); ++l) {
-            curr_edge = _poa_vertices[source].out_edges[l];
-            if (_poa_edges[curr_edge].source == source && _poa_edges[curr_edge].destination == destination) {
-                _poa_edges[curr_edge].sequence_IDs.push_back(seq_ID);
-                _poa_edges[curr_edge].weight += added_weight;
-                already_exists = true;
+            Graph &compacted_G)
+        {
+            // Check if the edge already exists
+            bool already_exists = false;
+            int curr_edge;
+            for (int l = 0; l < _poa_vertices[source].out_edges.size(); ++l) {
+                curr_edge = _poa_vertices[source].out_edges[l];
+                if (_poa_edges[curr_edge].source == source && _poa_edges[curr_edge].destination == destination) {
+                    _poa_edges[curr_edge].sequence_IDs.push_back(seq_ID);
+                    _poa_edges[curr_edge].weight += added_weight;
+                    already_exists = true;
+                }
             }
-        }
-
-        // It doesn't, so you should create it
-        if (!already_exists) {
-            POAEdge new_edge;
-            new_edge.source = source;
-            new_edge.destination = destination;
-            new_edge.weight = added_weight;
-            new_edge.sequence_IDs.push_back(seq_ID);
-
-            // Update the data in the poa graph
-            _poa_vertices[source].out_edges.push_back(_poa_edges.size());
-            _poa_vertices[destination].in_edges.push_back(_poa_edges.size());
-            _poa_edges.push_back(new_edge);
-
-            // Update the data in the compacted graph
-            split_vertices(source, destination, compacted_G);
-        }
+            // It doesn't, so you should create it
+            if (!already_exists) {
+                POAEdge new_edge;
+                new_edge.source = source;
+                new_edge.destination = destination;
+                new_edge.weight = added_weight;
+                new_edge.sequence_IDs.push_back(seq_ID);
+                // Update the data in the poa graph
+                _poa_vertices[source].out_edges.push_back(_poa_edges.size());
+                _poa_vertices[destination].in_edges.push_back(_poa_edges.size());
+                _poa_edges.push_back(new_edge);
+                // Update the data in the compacted graph
+                split_vertices(source, destination, compacted_G);
+            }
         }
 
         void convert_path(
@@ -310,21 +254,19 @@ namespace theseus {
             std::vector<int> &poa_path,
             Graph &compacted_G
         ) {
-
             // First vertex
-            poa_path.push_back(compacted_G._vertices[backtrace.path[0]].first_poa_vtx);
-
+            poa_path.push_back(_first_poa_vtx[backtrace.path[0]]);
             // Convert the path to a path in the poa graph
             for (int l = 0; l < backtrace.path.size(); ++l) {
-                int first_poa_vtx = compacted_G._vertices[backtrace.path[l]].first_poa_vtx;
-
-                for (int k = 0; k < compacted_G._vertices[backtrace.path[l]].value.size(); ++k) {
+                int first_poa_vtx = _first_poa_vtx[backtrace.path[l]];
+                // Add all internal vertices
+                int node_size = compacted_G.node_size(backtrace.path[l]);
+                for (int k = 0; k < node_size; ++k) {
                     poa_path.push_back(first_poa_vtx + k);
                 }
             }
-
             // Last vertex
-            poa_path.push_back(compacted_G._vertices[backtrace.path[backtrace.path.size() - 1]].first_poa_vtx);
+            // poa_path.push_back(_first_poa_vtx[backtrace.path[backtrace.path.size() - 1]]);
         }
 
 
@@ -332,72 +274,67 @@ namespace theseus {
         void add_alignment_poa(
             Graph &compacted_G,
             Alignment &backtrace,
-            std::string_view new_seq,
-            int seq_ID) {
+            SequenceView new_seq,
+            int seq_ID
+        ) {
+            // Convert the path to the corresponding path in the poa graph
+            std::vector<int> poa_path;
+            convert_path(backtrace, poa_path, compacted_G);
 
-        // Convert the path to the corresponding path in the poa graph
-        std::vector<int> poa_path;
-        convert_path(backtrace, poa_path, compacted_G);
-
-        bool new_vertex_exists = false;
-        int pos_new_vertex;
-        int i = 0, l = 0, k = 0, prev_v_poa = 0, new_v_poa = 0;
-        while (k < backtrace.edit_op.size()) {
-            // std::cout << "k: " << k << std::endl;
-            if (backtrace.edit_op[k] == 'M') {  // Match
-                prev_v_poa = new_v_poa;
-                new_v_poa = poa_path[l + 1];
-                update_poa_edge(prev_v_poa, new_v_poa, 1, seq_ID, compacted_G);
-                i += 1;
-                l += 1;
-                new_vertex_exists = false;
-            }
-            else if (backtrace.edit_op[k] == 'X') { // Mismatch
-                prev_v_poa = new_v_poa;
-                new_v_poa = poa_path[l + 1];
-                update_poa_vertex(new_v_poa, pos_new_vertex, new_seq[i], new_vertex_exists, compacted_G);
-                update_poa_edge(prev_v_poa, new_v_poa, 1, seq_ID, compacted_G);
-                i += 1;
-                l += 1;
-            }
-            else if (backtrace.edit_op[k] == 'D') { // Deletion
-                // Add the new vertex
-                POAVertex new_vertex;
-                new_vertex.value = new_seq[i];
-                _poa_vertices.push_back(new_vertex);
-
-                // Add a new compacted vertex
-                if (new_vertex_exists) {
-                    // Add a character to the existing vertex (the last one in compacted_G)
-                    compacted_G._vertices[pos_new_vertex].value.push_back(new_seq[i]);
-                    _poa_vertices[_poa_vertices.size() - 1].associated_vtx_compact = pos_new_vertex;
+            bool new_node_exists = false;
+            NodeId new_node_id;
+            // TODO: revise prev and new poa vertices
+            int i = 0, l = 0, k = 0, prev_v_poa = 0, new_v_poa = 0;
+            while (k < backtrace.edit_op.size()) {
+                // std::cout << "k: " << k << std::endl;
+                if (backtrace.edit_op[k] == 'M') {  // Match
+                    prev_v_poa = new_v_poa;
+                    new_v_poa = poa_path[l + 1];
+                    update_poa_edge(prev_v_poa, new_v_poa, 1, seq_ID, compacted_G);
+                    i += 1;
+                    l += 1;
+                    new_node_exists = false;
+                }
+                else if (backtrace.edit_op[k] == 'X') { // Mismatch
+                    prev_v_poa = new_v_poa;
+                    new_v_poa = poa_path[l + 1];
+                    update_poa_vertex(new_v_poa, new_node_id, new_seq[i], new_node_exists, compacted_G);
+                    update_poa_edge(prev_v_poa, new_v_poa, 1, seq_ID, compacted_G);
+                    i += 1;
+                    l += 1;
+                }
+                else if (backtrace.edit_op[k] == 'D') { // Deletion
+                    // Add the new vertex
+                    POAVertex new_vertex;
+                    new_vertex.value = new_seq[i];
+                    _poa_vertices.push_back(new_vertex);
+                    // Add/update a new compacted node
+                    if (new_node_exists) {
+                        // Add a character to the existing vertex (the last one in compacted_G)
+                        compacted_G.expand_sequence(new_node_id, std::string(1, new_seq[i]));
+                        _poa_vertices[_poa_vertices.size() - 1].associated_node_compact = new_node_id;
+                    }
+                    else {
+                        // Add node
+                        new_node_id = compacted_G.add_node(std::string(1, new_seq[i]));
+                        _first_poa_vtx.push_back(_poa_vertices.size() - 1);
+                        // Update the poa graph
+                        _poa_vertices[_poa_vertices.size() - 1].associated_node_compact = new_node_id;
+                        new_node_exists = true;
+                    }
+                    // Add the new edge
+                    prev_v_poa = new_v_poa;
+                    new_v_poa  = _poa_vertices.size() - 1;
+                    update_poa_edge(prev_v_poa, new_v_poa, 1, seq_ID, compacted_G);
+                    i += 1;
                 }
                 else {
-                    Graph::vertex new_vertex_compacted;
-                    new_vertex_compacted.first_poa_vtx = _poa_vertices.size() - 1;
-                    new_vertex_compacted.value.push_back(new_seq[i]);
-
-                    // The new vertex now exists
-                    compacted_G._vertices.push_back(new_vertex_compacted);
-                    pos_new_vertex = compacted_G._vertices.size() - 1;
-                    _poa_vertices[_poa_vertices.size() - 1].associated_vtx_compact = pos_new_vertex;
-                    new_vertex_exists = true;
+                    l += 1;
                 }
-
-                // Add the new edge
-                prev_v_poa = new_v_poa;
-                new_v_poa = _poa_vertices.size() - 1;
-                update_poa_edge(prev_v_poa, new_v_poa, 1, seq_ID, compacted_G);
-                i += 1;
+                k += 1;
             }
-            else {
-                l += 1;
-            }
-
-            k += 1;
-        }
-
             prev_v_poa = new_v_poa;
+            // TODO: Revise
             update_poa_edge(prev_v_poa, poa_path[poa_path.size() - 1], 1, seq_ID, compacted_G); // Add the edge to the sink node
         }
 
@@ -410,8 +347,9 @@ namespace theseus {
         {
             // Source vertex
             theseus::POAVertex source_v;
+            _first_poa_vtx.push_back(0);
             source_v.out_edges.push_back(0);
-            source_v.associated_vtx_compact = 0;
+            source_v.associated_node_compact = 0;
             _poa_vertices.push_back(source_v);
             theseus::POAEdge source_edge;
             source_edge.source = 0;
@@ -419,14 +357,15 @@ namespace theseus {
             source_edge.weight = 1;
             source_edge.sequence_IDs.push_back(0); // Sequence ID 0
             _poa_edges.push_back(source_edge);
-
             // Central vertices
-            for (int l = 0; l < G._vertices[1].value.size(); ++l) {
+            NodeView node_view = G.node(1);
+            _first_poa_vtx.push_back(1);
+            for (int l = 0; l < G.node_size(1); ++l) {
                 theseus::POAVertex new_v;
                 new_v.in_edges.push_back(_poa_edges.size() - 1);
                 new_v.out_edges.push_back(_poa_edges.size());
-                new_v.value = G._vertices[1].value[l];
-                new_v.associated_vtx_compact = 1;
+                new_v.value = node_view.sequence[l];
+                new_v.associated_node_compact = 1;
                 _poa_vertices.push_back(new_v);
                 theseus::POAEdge new_edge;
                 new_edge.source = _poa_vertices.size() - 1;
@@ -435,14 +374,14 @@ namespace theseus {
                 new_edge.sequence_IDs.push_back(0); // Sequence ID 0
                 _poa_edges.push_back(new_edge);
             }
-
             // Sink vertex
             theseus::POAVertex sink_v;
+            _first_poa_vtx.push_back(G.node_size(1) + 1);
             sink_v.in_edges.push_back(_poa_edges.size() - 1);
-            sink_v.associated_vtx_compact = 2;
+            sink_v.associated_node_compact = 2;
             _poa_vertices.push_back(sink_v);
-
-            _end_vtx_poa = _poa_vertices.size() - 1; // Set the end vertex
+            // Set the end vertex of the POA graph
+            _end_vtx_poa = _poa_vertices.size() - 1;
         }
 
         /**

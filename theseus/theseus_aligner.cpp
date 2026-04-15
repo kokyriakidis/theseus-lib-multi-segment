@@ -34,30 +34,28 @@ namespace theseus {
 
 TheseusAligner::TheseusAligner(const Penalties &penalties,
                                const Heuristics &heuristics,
-                               std::istream &gfa_stream,
-                               TheseusAligner::GfaStreamTag)
+                               Graph &&graph)
 {
-    Graph graph(gfa_stream);
     aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(graph), false);
 }
 
 TheseusAligner::TheseusAligner(const Penalties &penalties,
                                const Heuristics &heuristics,
-                               const handlegraph::HandleGraph &handle_graph)
+                               Graph &graph)
 {
-    Graph graph(handle_graph);
-    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(graph), false);
+    Graph graph_copy = graph; // Make a copy of the graph to ensure that the aligner has its own instance
+    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(graph_copy), false);
 }
-
 
 TheseusAligner::~TheseusAligner() {}
 
 void TheseusAligner::print_alignment_as_gaf(
                 theseus::Alignment &alignment,
                 std::ostream &out_stream,
-                std::string seq_name) {
+                std::string seq_name,
+                std::unordered_map<NodeId, std::string> &node_names) {
 
-    aligner_impl_->print_as_gaf(alignment, out_stream, seq_name);
+    aligner_impl_->print_as_gaf(alignment, out_stream, seq_name, node_names);
 }
 
 /**
@@ -70,10 +68,10 @@ void TheseusAligner::print_alignment_as_gaf(
  */
 Alignment TheseusAligner::align(
     std::string_view seq,
-    std::string &start_node,
+    NodeId &start_node,
     int start_offset) {
 
-    return aligner_impl_->align(seq, start_node, start_offset);
+    return aligner_impl_->align(seq, start_node, start_offset, false);
 }
 
 } // namespace theseus
