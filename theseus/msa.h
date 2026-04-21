@@ -266,7 +266,7 @@ namespace theseus {
                 }
             }
             // Last vertex
-            // poa_path.push_back(_first_poa_vtx[backtrace.path[backtrace.path.size() - 1]]);
+            poa_path.push_back(_first_poa_vtx[backtrace.path[backtrace.path.size() - 1]]);
         }
 
 
