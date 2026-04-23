@@ -102,7 +102,7 @@ void read_sequences(
         }
     }
 
-    // Store the last sequence
+    // Store the last sequencealignments
     if (num > 0) {
       sequences.push_back(sequence);
     }
@@ -152,7 +152,7 @@ CMDArgs parse_args(int argc, char *const *argv) {
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "m:x:o:e:t:s:f:ld:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "m:x:o:e:t:s:f:ld", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'm':
                 args.match = std::stoi(optarg);
