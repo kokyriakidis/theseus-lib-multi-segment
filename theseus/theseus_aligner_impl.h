@@ -319,6 +319,12 @@ private:
         Cell::Matrix from_matrix);
 
     /**
+     * @brief Initialize the partial backtrace, by finding the starting cell for backtrace.
+     *
+     */
+    void init_partial_backtrace();
+
+    /**
      * @brief Add matches to our backtracking vector.
      *
      * @param start_matches

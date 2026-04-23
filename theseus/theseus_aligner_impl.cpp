@@ -97,7 +97,7 @@ void TheseusAlignerImpl::new_alignment(SequenceView seq,
     const auto n_scores = std::max({_internal_penalties.gapo() +_internal_penalties.gape(),
                                   _internal_penalties.gapo() +_internal_penalties.gape(),
                                   _internal_penalties.mism()}) + 1;
-    _heuristics.new_alignment(n_scores, _internal_penalties.mism(), _internal_penalties.gape());
+    _heuristics.new_alignment(n_scores, _internal_penalties.mism(), _internal_penalties.gape(), _seq.size());
     // TODO: Allow for different initial conditions. Now only global alignment.
     Cell init_condition;
     init_condition.offset = 0;
@@ -145,6 +145,7 @@ void TheseusAlignerImpl::compute_new_wave() {
     curr_node_id = _vertices_data->get_vertex_id(l);
     process_vertex(curr_node_id);
   }
+  _beyond_scope->update_positions();
 }
 
 
@@ -210,6 +211,15 @@ Alignment TheseusAlignerImpl::align(
     }
     else if (_alignment.theseus_status == THESEUS_STATUS_END_UNREACHABLE) {
       std::cerr << THESEUS_STATUS_END_UNREACHABLE_MSG << std::endl;
+      // Choose starting position for backtrace (cell with maximum offset in M[s-_s_min]-M[s-_s_min - scope_size])
+      // matrix on the last scope scores
+      init_partial_backtrace();
+      // Perform partial backtrace
+      backtrace();
+      // Update the graph in case of MSA
+      if (_is_msa) {
+          _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
+      }
     }
   }
   return _alignment;
@@ -588,6 +598,39 @@ void TheseusAlignerImpl::extend_diagonal(
   if (j == curr_node.sequence.size() && curr_cell.offset <= _seq.size() && has_out_nodes(curr_node_id)) {
     store_M_jump(curr_node, prev_cell, prev_pos, from_matrix); // Store the jump in neighbours
   }
+}
+
+
+// Initialize the partial backtrace, by finding the starting cell for backtrace.
+// We find this cell by checking all the active cells in scores (s-_s_min, ..., s-_s_min-_scope_size)
+void TheseusAlignerImpl::init_partial_backtrace() {
+  Cell best_cell;
+  best_cell.offset = -1;
+  // Iterate through the valid score range
+  int start_score = _score - _heuristics.s_min() - _scope->size();
+  start_score = std::max(0, start_score);
+  // Iterate in the M structure for score s TODO: I_jumps?
+  for (int s = start_score; s <= _score - _heuristics.s_min(); ++s) {
+    // Check M wavefront
+    int start_pos_M = (s == 0) ? 0 : _beyond_scope->m_wf_pos(s-1);
+    int end_pos_M   = _beyond_scope->m_wf_pos(s) - 1;
+    for (int pos = start_pos_M; pos < end_pos_M; ++pos) {
+      Cell curr_cell = _beyond_scope->m_wf()[pos];
+      if (curr_cell.offset > best_cell.offset) {
+        best_cell = curr_cell;
+      }
+    }
+    // Check M_jumps wavefront
+    int start_pos_M_jumps = (s == 0) ? 0 : _beyond_scope->m_jumps_wf_pos(s-1);
+    int end_pos_M_jumps   = _beyond_scope->m_jumps_wf_pos(s) - 1;
+    for (int pos = start_pos_M_jumps; pos < end_pos_M_jumps; ++pos) {
+      Cell curr_cell = _beyond_scope->m_jumps_wf()[pos];
+      if (curr_cell.offset > best_cell.offset) {
+        best_cell = curr_cell;
+      }
+    }
+  }
+  _start_pos = best_cell;
 }
 
 

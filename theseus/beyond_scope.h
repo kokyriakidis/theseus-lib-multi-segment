@@ -71,7 +71,24 @@ public:
         _m_jumps_wf.clear();
         _i_jumps_wf.clear();
         _i2_jumps_wf.clear();
+
+        _m_wf_pos.clear();
+        _m_jumps_wf_pos.clear();
+        _i_jumps_wf_pos.clear();
     }
+
+    /**
+     * @brief Update the positions vectors. This means, compute the size of the
+     * four Cell vectors (M, M_jumps, I and I_jumps) and push this value back to
+     * the associated vectors.
+     *
+     */
+    void update_positions() {
+        _m_wf_pos.push_back(_m_wf.size());
+        _m_jumps_wf_pos.push_back(_m_jumps_wf.size());
+        _i_jumps_wf_pos.push_back(_i2_jumps_wf.size());
+    }
+
 
     /**
      * @brief Access the i_jumps wavefront
@@ -100,6 +117,31 @@ public:
         return _m_wf;
     }
 
+    /**
+     * @brief Access the m wavefront positions vector
+     *
+     * @return Cell::Wavefront&
+     */
+    int m_wf_pos(int s) {
+        return _m_wf_pos[s];
+    }
+
+    /**
+     * @brief Access the m jumps wavefront positions vector
+     *
+     */
+    int m_jumps_wf_pos(int s) {
+        return _m_jumps_wf_pos[s];
+    }
+
+    /**
+     * @brief Access the i jumps wavefront positions vector
+     *
+     */
+    int i_jumps_wf_pos(int s) {
+        return _i_jumps_wf_pos[s];
+    }
+
 
 private:
     static constexpr std::ptrdiff_t dense_wf_realloc_policy(std::ptrdiff_t capacity,
@@ -111,6 +153,11 @@ private:
     Cell::CellVector _m_jumps_wf;  // M Jumps structure backtrace wavefront
     Cell::CellVector _i_jumps_wf;  // I Jumps structure backtrace wavefront
     Cell::CellVector _i2_jumps_wf; // I2 Jumps structure backtrace wavefront
+
+    // Vectors to know the span of cells associated to each score
+    std::vector<int> _m_wf_pos;
+    std::vector<int> _m_jumps_wf_pos;
+    std::vector<int> _i_jumps_wf_pos;
 };
 
 } // namespace theseus
