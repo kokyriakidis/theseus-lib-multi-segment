@@ -129,8 +129,8 @@ void help() {
                  "  -s, --sequences <file>      Dataset file                                            [Required]\n\n"
 
                  " Heuristics:\n"
-                 "  -l  --lag_pruning           Activate pruning of diagonals lagging behind int the alignment.  \n"
-                 "  -d  --density_heuristic     Actice a drop heuristic based on advancement density.            \n";
+                 "  -d  --density_heuristic     Activate the drop heuristic based on advancement density.            \n"
+                 "  -l  --lag_pruning           Activate the pruning of diagonals lagging behind int the alignment.  \n";
 }
 
 CMDArgs parse_args(int argc, char *const *argv) {

@@ -336,22 +336,22 @@ void read_seq_pos_data(
  * @brief Print the help message.
  */
 void help() {
-    std::cout << "Usage: benchmark [OPTIONS]\n"
+    std::cout << "Usage: theseus_aligner [OPTIONS]\n"
                  "Options:\n"
                  "  Penalties:\n"
-                 "  -m, --match <int>            The match penalty                                [default=0]\n"
-                 "  -x, --mismatch <int>         The mismatch penalty                             [default=2]\n"
-                 "  -o, --gapo <int>             The gap open penalty                             [default=3]\n"
-                 "  -e, --gape <int>             The gap extension penalty                        [default=1]\n\n"
+                 "  -m, --match <int>            The match penalty                                       [default=0]\n"
+                 "  -x, --mismatch <int>         The mismatch penalty                                    [default=2]\n"
+                 "  -o, --gapo <int>             The gap open penalty                                    [default=3]\n"
+                 "  -e, --gape <int>             The gap extension penalty                               [default=1]\n\n"
 
                  "  I/O:\n"
-                 "  -g, --graph_file <file>      Graph file in .gfa format                        [Required]\n"
-                 "  -s, --sequences_file <file>  Sequences and starting positons in .fasta format [Required]\n"
-                 "  -f, --output_file <file>     Output file                                      [Required]\n\n"
+                 "  -g, --graph_file <file>      Graph file in .gfa format                               [Required]\n"
+                 "  -s, --sequences_file <file>  Sequences and starting positons in .fasta format        [Required]\n"
+                 "  -f, --output_file <file>     Output file                                             [Required]\n\n"
 
                  " Heuristics:\n"
-                 "  -l  --lag_pruning           Activate pruning of diagonals lagging behind int the alignment.  \n"
-                 "  -d  --density_heuristic     Actice a drop heuristic based on advancement density.            \n";
+                 "  -d  --density_heuristic     Activate the drop heuristic based on advancement density.            \n"
+                 "  -l  --lag_pruning           Activate the pruning of diagonals lagging behind int the alignment.  \n";
 }
 
 CMDArgs parse_args(int argc, char *const *argv) {
