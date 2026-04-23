@@ -188,6 +188,19 @@ This example illustrates how to use the **pericles** tool. This tool computes th
 ```
 cd build/tools/
 ```
+**[IMPORTANT]**
+The *.fasta* file containing sequences has a special structure. As all .fasta files, the data associated to each sequence has two parts: 1) A line starting with ">" containing metadata, and 2) the sequence itself, that appears on the next lines.
+
+1) Constists of one element: ">" and a boolean value (0 or 1) indicating whether the associated read should be mapped in the canonical direction (from left to right and from source to sink) or in the reverse direction (from right to left and from sink to source).
+2) Contains the sequence itself.
+
+Examples aligning in the canonical and reversed directions:
+```
+>0
+ACCT
+>1
+TCCA
+```
 
 Select the scoring scheme, set the input and output files and execute the tool. Each execution of *pericles* lets you select the following parameters:
 ```
