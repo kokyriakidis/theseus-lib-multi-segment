@@ -675,8 +675,12 @@ void TheseusAlignerImpl::one_backtrace_step(
   else if (curr_cell.from_matrix == Cell::Matrix::MJumps) prev_cell = _beyond_scope->m_jumps_wf()[curr_cell.prev_pos];
   else prev_cell = _beyond_scope->i_jumps_wf()[curr_cell.prev_pos];
   int num_indels;
+  bool is_jump = ((curr_cell.vertex_id != prev_cell.vertex_id) ||
+                  ((curr_cell.vertex_id == prev_cell.vertex_id) &&
+                  (prev_cell.offset == _graph.node_size(prev_cell.vertex_id)) &&
+                  (curr_cell.offset != prev_cell.offset)));
   // We are inside the same vertex
-  if (curr_cell.vertex_id == prev_cell.vertex_id) { // Still in the same vertex
+  if (!is_jump) { // Still in the same vertex
     // Mismatch
     if (curr_cell.diag == prev_cell.diag) {
       if (curr_cell.offset > prev_cell.offset) {    // Consider 0 length vertices
