@@ -120,7 +120,7 @@ std::string reverse_complement(const std::string &dna_string) {
 
 
 // Construct a graph object from a  GFA file stream
-theseus::Graph graph_from_gfa_stream(std::istream &gfa_stream,
+void graph_from_gfa_stream(std::istream &gfa_stream,
                                      theseus::Graph &graph,
                                      std::unordered_map<std::string, NodeId> &name_to_id,
                                      std::unordered_map<NodeId, std::string> &node_names) {
@@ -432,6 +432,7 @@ int main(int argc, char *const *argv) {
     std::unordered_map<std::string, NodeId> name_to_id;
     std::unordered_map<NodeId, std::string> node_names;
     graph_from_gfa_stream(graph_file, graph, name_to_id, node_names);
+    std::cout << "Hola" << std::endl;
     // Prepare the aligner
     theseus::TheseusAligner aligner(penalties, heuristics, std::move(graph));
     // Read queries data
