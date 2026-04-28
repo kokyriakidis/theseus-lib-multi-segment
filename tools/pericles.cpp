@@ -34,6 +34,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <sstream>
 
 #include "theseus/alignment.h"
 #include "theseus/heuristics.h"
@@ -68,6 +69,7 @@ struct CMDArgs {
 void read_sequences(
     std::vector<std::string> &sequences,
     std::vector<bool> &reversed,
+    std::vector<bool> &is_ends_free,
     CMDArgs &args)
 {
 
@@ -93,8 +95,12 @@ void read_sequences(
             if (num > 0) sequences.push_back(sequence);
             sequence.clear();
             num += 1;
-            if (line[1] == '1') reversed.push_back(true);
-            else                reversed.push_back(false);
+            std::istringstream iss(line);
+            char header;
+            int rev, ends_free;
+            iss >> header >> rev >> ends_free;
+            reversed.push_back(rev == 1);
+            is_ends_free.push_back(ends_free == 1);
         }
         else
         {
@@ -213,18 +219,18 @@ int main(int argc, char *const *argv) {
     theseus::Heuristics heuristics(args.density_drop, args.lag_pruning);
     // Read the sequences for the MSA
     std::vector<std::string> sequences;
-    std::vector<bool> reversed;
-    read_sequences(sequences, reversed, args);
+    std::vector<bool> reversed, is_ends_free;
+    read_sequences(sequences, reversed, is_ends_free, args);
 
     // Prepare the data
     std::vector<theseus::Alignment> alignments(sequences.size());
     std::string_view initial_seq = sequences[0];
-    theseus::TheseusMSA aligner(penalties, heuristics, initial_seq);
+    theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, is_ends_free[0]);
 
     // Alignment with Theseus
     for (int j = 1; j < sequences.size(); ++j) {
         std::cout << "Processing sequence " << j << std::endl;
-        alignments[j] = aligner.align(sequences[j], reversed[j]);
+        alignments[j] = aligner.align(sequences[j], reversed[j], is_ends_free[j]);
         std::cout << "Score = " << alignments[j].compute_affine_gap_score(penalties) << std::endl << std::endl;
     }
 

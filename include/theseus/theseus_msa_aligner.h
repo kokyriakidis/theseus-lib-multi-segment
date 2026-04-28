@@ -54,14 +54,16 @@ namespace theseus
         /**
          * Initial constructor
          *
-         * @param penalties  User defined alignment penalties
-         * @param heuristics User defined heuristics
-         * @param seq        Sequence to initialize the graph
+         * @param penalties    User defined alignment penalties
+         * @param heuristics   User defined heuristics
+         * @param seq          Sequence to initialize the graph
+         * @param is_ends_free Whether to use ends-free alignment
          */
         TheseusMSA(
             const Penalties &penalties,
             const Heuristics &heuristics,
-            std::string_view seq);
+            std::string_view seq,
+            bool is_ends_free);
 
         /**
          * Class destructor
@@ -75,7 +77,8 @@ namespace theseus
          * @param seq Sequence to add to the MSA
          */
         Alignment align(std::string_view seq,
-                        bool reverse_alignment = false);
+                        bool reverse_alignment = false,
+                        bool is_ends_free = false);
 
         /**
          * @brief Print the current POA graph as a GFA file.
@@ -107,6 +110,7 @@ namespace theseus
 
     private:
         std::unique_ptr<TheseusAlignerImpl> msa_aligner_impl_;
+        bool still_end_to_end = true;
     };
 
 } // namespace theseus

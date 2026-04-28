@@ -280,7 +280,8 @@ namespace theseus {
             // Convert the path to the corresponding path in the poa graph
             std::vector<int> poa_path;
             convert_path(backtrace, poa_path, compacted_G);
-
+            // Reversed sequences are added "forward". Change access to them
+            new_seq.change_reversed_flag(false);
             bool new_node_exists = false;
             NodeId new_node_id;
             // TODO: revise prev and new poa vertices

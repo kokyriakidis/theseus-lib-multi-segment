@@ -60,24 +60,21 @@ class TheseusAlignerImpl {
 public:
     TheseusAlignerImpl(const Penalties &penalties,
                        const Heuristics &heuristics,
-                       Graph &&graph,
-                       bool msa);
+                       Graph &&graph);
 
     /**
      * @brief Main alignment function. Aligns the given sequence to the graph
      * starting at the specified node and offset.
      *
      * @param seq               Sequence to be aligned
-     * @param start_node        Starting node in the graph
-     * @param start_offset      Starting offset within the starting node
      * @param reverse_alignment  Whether to perform reverse alignment
+     * @param is_ends_free       Whether to allow a free end on the "end" of the graph
      *
      * @return                  Alignment object
      */
     Alignment align(std::string_view seq,
-                    NodeId &start_node,
-                    int start_offset = 0,
-                    bool reverse_alignment = false);
+                    bool reverse_alignment = false,
+                    bool is_ends_free = false);
 
     /**
      * @brief Output the current graph in GFA format.
@@ -393,9 +390,9 @@ private:
 
     std::unique_ptr<POAGraph> _poa_graph; // Partial order alignment graph for MSA
 
-    bool _is_msa;
+    bool _ends_free;
     bool _reversed_alignment;
-    // int _end_vertex;
+    int _end_node;
     int _seq_ID = 0;
     NodeId _start_node;
     int _start_offset;

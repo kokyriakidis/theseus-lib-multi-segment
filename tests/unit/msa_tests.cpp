@@ -50,7 +50,7 @@ TEST_CASE("Check MSA aligner") {
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
         theseus::Heuristics heuristics(false, false);                  // Create heuristics object
-        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, false); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq, false);
@@ -70,7 +70,7 @@ TEST_CASE("Check MSA aligner") {
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
         theseus::Heuristics heuristics(false, false);                  // Create heuristics object
-        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, false); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq);
@@ -90,7 +90,7 @@ TEST_CASE("Check MSA aligner") {
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
         theseus::Heuristics heuristics(false, false);                  // Create heuristics object
-        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, false); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq, false);
@@ -110,7 +110,7 @@ TEST_CASE("Check MSA aligner") {
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
         theseus::Heuristics heuristics(false, false);                  // Create heuristics object
-        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, false); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq, false);
@@ -130,7 +130,7 @@ TEST_CASE("Check MSA aligner") {
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
         theseus::Heuristics heuristics(false, false);                  // Create heuristics object
-        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, false); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq, false);
@@ -149,7 +149,7 @@ TEST_CASE("Check MSA aligner") {
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
         theseus::Heuristics heuristics(false, false);                  // Create heuristics object
-        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, false); // Create aligner
 
         // Align the new sequence
         theseus::Alignment alignment = aligner.align(new_seq, false);
@@ -170,7 +170,7 @@ TEST_CASE("Check MSA aligner") {
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
         theseus::Heuristics heuristics(false, false);                  // Create heuristics object
-        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, false); // Create aligner
 
         // Align and check sequence 1
         theseus::Alignment alignment = aligner.align(seq_1, false);
@@ -201,7 +201,7 @@ TEST_CASE("Check MSA aligner") {
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                        // Create penalties object
         theseus::Heuristics heuristics(false, false);                  // Create heuristics object
-        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq); // Create aligner
+        theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, false); // Create aligner
 
         // Align and check sequence 1
         theseus::Alignment alignment = aligner.align(seq_1, true);

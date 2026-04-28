@@ -33,23 +33,19 @@ namespace theseus {
 
 TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
                                        const Heuristics &heuristics,
-                                       Graph &&graph,
-                                       bool msa) :  _penalties(penalties),
-                                                    _heuristics(heuristics),
-                                                    _graph(std::move(graph)),
-                                                    _is_msa(msa),
-                                                    _internal_penalties(penalties),
-                                                    _seq("", false) {
+                                       Graph &&graph) :  _penalties(penalties),
+                                                         _heuristics(heuristics),
+                                                         _graph(std::move(graph)),
+                                                         _internal_penalties(penalties),
+                                                         _seq("", false) {
     // TODO: Gap-linear and dual affine-gap.
     const auto n_scores = std::max({_internal_penalties.gapo() +_internal_penalties.gape(),
                                   _internal_penalties.gapo() +_internal_penalties.gape(),
                                   _internal_penalties.mism()}) + 1;
 
-    if (_is_msa) {
-      _poa_graph = std::make_unique<POAGraph>();
-      _poa_graph->create_initial_graph(_graph);
-    }
-
+    // Always MSA for pericles
+    _poa_graph = std::make_unique<POAGraph>();
+    _poa_graph->create_initial_graph(_graph);
     _internal_penalties = InternalPenalties(penalties);
     _scope = std::make_unique<Scope>(n_scores);
     _beyond_scope = std::make_unique<BeyondScope>();
@@ -151,29 +147,24 @@ void TheseusAlignerImpl::compute_new_wave() {
 
 Alignment TheseusAlignerImpl::align(
     std::string_view seq,
-    NodeId &start_node,
-    int start_offset,
-    bool reverse_alignment)
+    bool reverse_alignment,
+    bool is_ends_free
+  )
 {
-  // Set start position
-  if (_is_msa) {
-    if (!reverse_alignment) {
-      _start_node = 0;
-      _start_offset = 0;
-    }
-    else {
-      _start_node = 2;
-      _start_offset = 0;
-    }
+  if (!reverse_alignment) {
+    _start_node = 0;
+    _start_offset = 0;
+    _end_node = 2;
   }
   else {
-    _start_node = start_node;
-    _start_offset = start_offset;
+    _start_node = 2;
+    _start_offset = 0;
+    _end_node = 0;
   }
+  _ends_free = is_ends_free;
   // Initialize data for the new alignment
   new_alignment(Graph::SequenceView(seq, reverse_alignment), reverse_alignment);
   _score = 0;
-  // _end_vertex = 2; // TODO: Set the end vertex
   // _graph.print_code_graphviz();
   // Main alignment loop
   while (_alignment.theseus_status == THESEUS_STATUS_OK) {
@@ -199,10 +190,7 @@ Alignment TheseusAlignerImpl::align(
   _seq_ID += 1;
   if (_alignment.theseus_status == THESEUS_STATUS_ALG_COMPLETED) {
     backtrace();
-    // Update the graph in case of MSA
-    if (_is_msa) {
-        _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
-    }
+    _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
   }
   else {
     // Error messages
@@ -216,10 +204,7 @@ Alignment TheseusAlignerImpl::align(
       init_partial_backtrace();
       // Perform partial backtrace
       backtrace();
-      // Update the graph in case of MSA
-      if (_is_msa) {
-          _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
-      }
+      _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
     }
   }
   return _alignment;
@@ -557,17 +542,20 @@ void TheseusAlignerImpl::LCP(
 void TheseusAlignerImpl::check_end_condition(
     Cell curr_data)
 {
-  if (curr_data.offset == _seq.size()) {
+  // Ends free
+  if (_ends_free) {
+    if (curr_data.offset == _seq.size() || curr_data.vertex_id == _end_node) {
     _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
     _start_pos = curr_data;
+    }
   }
-  // if (!_is_msa && curr_data.offset == _seq.size()) {
-  // }
-  // else if (_is_msa && curr_data.offset == _seq.size()) {
-  // // else if (_is_msa && curr_data.offset == _seq.size() && v == _end_vertex && j == j_end) { // End condition global alignment
-  //   _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
-  //   _start_pos = curr_data;
-  // }
+  // End to end
+  else {
+    if (curr_data.offset == _seq.size()) {
+      _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
+      _start_pos = curr_data;
+    }
+  }
 }
 
 
@@ -806,24 +794,13 @@ void TheseusAlignerImpl::print_as_gfa(std::ofstream &gfa_output)
 
 // Print as msa (can only call from TheseusMSA)
 void TheseusAlignerImpl::print_as_msa(std::ofstream &out_stream) {
-  if (_is_msa) {
-    _poa_graph->poa_to_fasta(_seq_ID, out_stream);
-    }
-  else {
-    std::cout << "Error: msa output is only available for MSA mode." << std::endl;
-  }
+  _poa_graph->poa_to_fasta(_seq_ID, out_stream);
 }
 
 
 // Find and return the consensus sequence (can only call from TheseusMSA)
 std::string TheseusAlignerImpl::get_consensus_sequence() {
-  if (_is_msa) {
-    return _poa_graph->poa_to_consensus();
-  }
-  else {
-    std::cout << "Error: consensus sequence is only available for MSA mode." << std::endl;
-    return "";
-  }
+  return _poa_graph->poa_to_consensus();
 }
 
 

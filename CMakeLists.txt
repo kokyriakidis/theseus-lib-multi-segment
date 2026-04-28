@@ -6,23 +6,6 @@ include(GNUInstallDirs)
 include(FetchContent)
 
 #
-# DEPENDENCIES
-#
-
-FetchContent_Declare(
-    libhandlegraph
-    GIT_REPOSITORY https://github.com/vgteam/libhandlegraph.git
-    GIT_TAG b95f7637968b4c8c3c4d1bad13aaa1835c607fe0
-)
-
-FetchContent_GetProperties(libhandlegraph)
-if(NOT libhandlegraph_POPULATED)
-    FetchContent_Populate(libhandlegraph)
-    # EXCLUDE_FROM_ALL to avoid installing libhandlegraph targets when make install
-    add_subdirectory(${libhandlegraph_SOURCE_DIR} ${libhandlegraph_BINARY_DIR})
-endif()
-
-#
 # SETTINGS
 #
 
@@ -69,9 +52,6 @@ target_include_directories(${PROJECT_NAME}
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-
-# Link against dependencies
-target_link_libraries(${PROJECT_NAME} PUBLIC handlegraph_static)
 
 # Per-target warnings for debug builds (PRIVATE to avoid leaking to consumers)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")

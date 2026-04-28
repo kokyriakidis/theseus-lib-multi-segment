@@ -338,6 +338,10 @@ public:
             return os;
         }
 
+        void change_reversed_flag(bool new_flag_value) {
+            reversed_ = new_flag_value;
+        }
+
         [[nodiscard]] bool is_reversed() const noexcept { return reversed_; }
 
         [[nodiscard]] SequenceView reversed() const noexcept {

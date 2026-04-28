@@ -36,8 +36,13 @@ using NodeId = Graph::NodeId;
 
 TheseusMSA::TheseusMSA(const Penalties &penalties,
                        const Heuristics &heuristics,
-                       std::string_view seq) {
+                       std::string_view seq,
+                       bool is_ends_free) {
 
+    // Error out if the sequence is ends_free. Ask for a backbone (end-to-end)
+    if (is_ends_free) {
+        throw std::invalid_argument("Sequence must be end-to-end for MSA initialization");
+    }
     // Create the initial graph
     theseus::Graph G;
     // Add nodes
@@ -48,7 +53,7 @@ TheseusMSA::TheseusMSA(const Penalties &penalties,
     G.add_edge(source_node_id, central_node_id);
     G.add_edge(central_node_id, sink_node_id);
     // Construct the aligner implementation
-    msa_aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(G), true);
+    msa_aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(G));
 }
 
 /**
@@ -61,16 +66,22 @@ TheseusMSA::~TheseusMSA() {}
  * @brief Main alignment function for the Theseus aligner.
  *
  * @param seq
- * @param start_node
- * @param start_offset
+ * @param reverse_alignment
+ * @param is_ends_free
  * @return Alignment
  */
 Alignment TheseusMSA::align(
     std::string_view seq,
-    bool reverse_alignment) {
+    bool reverse_alignment,
+    bool is_ends_free) {
 
-    NodeId start_node;
-    return msa_aligner_impl_->align(seq, start_node, 0, reverse_alignment);
+    // Error out if you are adding a backbone sequence after partial sequences
+    if (!still_end_to_end && !is_ends_free) {
+        throw std::invalid_argument("Cannot add a backbone sequence after partial sequences");
+    }
+    // Update the still_end_to_end value
+    still_end_to_end = !is_ends_free;
+    return msa_aligner_impl_->align(seq, reverse_alignment, is_ends_free);
 }
 
 /**
