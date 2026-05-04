@@ -33,11 +33,12 @@ namespace theseus {
 
 TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
                                        const Heuristics &heuristics,
-                                       Graph &&graph) :  _penalties(penalties),
-                                                         _heuristics(heuristics),
-                                                         _graph(std::move(graph)),
-                                                         _internal_penalties(penalties),
-                                                         _seq("", false) {
+                                       Graph &&graph,
+                                       int initial_weight) :  _penalties(penalties),
+                                                              _heuristics(heuristics),
+                                                              _graph(std::move(graph)),
+                                                              _internal_penalties(penalties),
+                                                              _seq("", false) {
     // TODO: Gap-linear and dual affine-gap.
     const auto n_scores = std::max({_internal_penalties.gapo() +_internal_penalties.gape(),
                                   _internal_penalties.gapo() +_internal_penalties.gape(),
@@ -45,7 +46,7 @@ TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
 
     // Always MSA for pericles
     _poa_graph = std::make_unique<POAGraph>();
-    _poa_graph->create_initial_graph(_graph);
+    _poa_graph->create_initial_graph(_graph, initial_weight);
     _internal_penalties = InternalPenalties(penalties);
     _scope = std::make_unique<Scope>(n_scores);
     _beyond_scope = std::make_unique<BeyondScope>();
@@ -147,6 +148,7 @@ void TheseusAlignerImpl::compute_new_wave() {
 
 Alignment TheseusAlignerImpl::align(
     std::string_view seq,
+    int  weight,
     bool reverse_alignment,
     bool is_ends_free
   )
@@ -190,7 +192,10 @@ Alignment TheseusAlignerImpl::align(
   _seq_ID += 1;
   if (_alignment.theseus_status == THESEUS_STATUS_ALG_COMPLETED) {
     backtrace();
-    _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
+    int start_column = _reversed_alignment ? 
+                       _graph.node_size(_start_pos.vertex_id) - (_start_pos.offset + _start_pos.diag) :
+                       _start_pos.offset + _start_pos.diag;
+    _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, weight, !_ends_free, _reversed_alignment);
   }
   else {
     // Error messages
@@ -204,7 +209,10 @@ Alignment TheseusAlignerImpl::align(
       init_partial_backtrace();
       // Perform partial backtrace
       backtrace();
-      _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID);
+      int start_column = _reversed_alignment ? 
+                       _graph.node_size(_start_pos.vertex_id) - (_start_pos.offset + _start_pos.diag) :
+                       _start_pos.offset + _start_pos.diag;
+      _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, weight, !_ends_free, _reversed_alignment);
     }
   }
   return _alignment;
@@ -551,7 +559,7 @@ void TheseusAlignerImpl::check_end_condition(
   }
   // End to end
   else {
-    if (curr_data.offset == _seq.size()) {
+    if (curr_data.offset == _seq.size() && curr_data.vertex_id == _end_node) {
       _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
       _start_pos = curr_data;
     }
@@ -663,10 +671,7 @@ void TheseusAlignerImpl::one_backtrace_step(
   else if (curr_cell.from_matrix == Cell::Matrix::MJumps) prev_cell = _beyond_scope->m_jumps_wf()[curr_cell.prev_pos];
   else prev_cell = _beyond_scope->i_jumps_wf()[curr_cell.prev_pos];
   int num_indels;
-  bool is_jump = ((curr_cell.vertex_id != prev_cell.vertex_id) ||
-                  ((curr_cell.vertex_id == prev_cell.vertex_id) &&
-                  (prev_cell.offset == _graph.node_size(prev_cell.vertex_id)) &&
-                  (curr_cell.offset != prev_cell.offset)));
+  bool is_jump = ((curr_cell.vertex_id != prev_cell.vertex_id));
   // We are inside the same vertex
   if (!is_jump) { // Still in the same vertex
     // Mismatch

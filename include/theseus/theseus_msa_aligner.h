@@ -57,12 +57,14 @@ namespace theseus
          * @param penalties    User defined alignment penalties
          * @param heuristics   User defined heuristics
          * @param seq          Sequence to initialize the graph
+         * @param initial_weight    Initial weight for the first added sequence
          * @param is_ends_free Whether to use ends-free alignment
          */
         TheseusMSA(
             const Penalties &penalties,
             const Heuristics &heuristics,
             std::string_view seq,
+            int initial_weight,
             bool is_ends_free);
 
         /**
@@ -77,6 +79,7 @@ namespace theseus
          * @param seq Sequence to add to the MSA
          */
         Alignment align(std::string_view seq,
+                        int  weight = 1,
                         bool reverse_alignment = false,
                         bool is_ends_free = false);
 

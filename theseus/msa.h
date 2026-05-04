@@ -48,19 +48,19 @@ namespace theseus {
 
     class POAVertex {
         public:
+            std::vector<int> sequence_IDs;      // Sequence IDs
             std::vector<int> associated_vtxs;   // Associated vertexes
             std::vector<int> in_edges;          // In-going vertices
             std::vector<int> out_edges;         // Out-going vertices
             NodeId associated_node_compact;     // Corresponding node in the compact G graph
+            int weight;                         // Weight of the node
             char value;                         // Base pair in this vertex
     };
 
     class POAEdge {
         public:
-            std::vector<int> sequence_IDs;      // Sequence IDs
             int source;                         // Source vertex
             int destination;                    // Destination vertex
-            int weight;                         // Weight of the edge
     };
 
     class POAGraph {
@@ -147,13 +147,17 @@ namespace theseus {
          * @param value             Value to add
          * @param new_node_exists   Whether the node already exists or not in compacted_G
          * @param compacted_G       The compacted graph
+         * @param seq_ID
+         * @param added_weight
          */
         void update_poa_vertex(
             int &poa_v,
             NodeId &new_node_id,
             char value,
             bool &new_node_exists,
-            Graph &compacted_G)
+            Graph &compacted_G,
+            int seq_ID,
+            int added_weight)
         {
             // Check if the vertex already exists
             bool already_exists = false;
@@ -178,6 +182,7 @@ namespace theseus {
                 new_vertex.value           = value;
                 new_vertex.associated_vtxs = _poa_vertices[poa_v].associated_vtxs;      // Associate it the necessary vertices
                 new_vertex.associated_vtxs.push_back(poa_v);                            // Add the vtx poa_v, as it is missing
+                new_vertex.weight          = 0;
                 _poa_vertices.push_back(new_vertex);
                 poa_v = _poa_vertices.size() - 1; // poa_v is the vertex that will be used when adding an edge
 
@@ -203,6 +208,10 @@ namespace theseus {
                     new_node_exists = true;
                 }
             }
+
+            // Add sequence_ID
+            _poa_vertices[poa_v].sequence_IDs.push_back(seq_ID);
+            _poa_vertices[poa_v].weight += added_weight;
         }
 
 
@@ -211,25 +220,22 @@ namespace theseus {
          *
          * @param source
          * @param destination
-         * @param added_weight
-         * @param seq_ID
          * @param G
          */
         void update_poa_edge(
             int source,
             int destination,
-            int added_weight,
-            int seq_ID,
             Graph &compacted_G)
         {
+            // Stop if one of the nodes is not valid
+            if (source == -1 || destination == -1) return;
+
             // Check if the edge already exists
             bool already_exists = false;
             int curr_edge;
             for (int l = 0; l < _poa_vertices[source].out_edges.size(); ++l) {
                 curr_edge = _poa_vertices[source].out_edges[l];
                 if (_poa_edges[curr_edge].source == source && _poa_edges[curr_edge].destination == destination) {
-                    _poa_edges[curr_edge].sequence_IDs.push_back(seq_ID);
-                    _poa_edges[curr_edge].weight += added_weight;
                     already_exists = true;
                 }
             }
@@ -238,8 +244,6 @@ namespace theseus {
                 POAEdge new_edge;
                 new_edge.source = source;
                 new_edge.destination = destination;
-                new_edge.weight = added_weight;
-                new_edge.sequence_IDs.push_back(seq_ID);
                 // Update the data in the poa graph
                 _poa_vertices[source].out_edges.push_back(_poa_edges.size());
                 _poa_vertices[destination].in_edges.push_back(_poa_edges.size());
@@ -252,12 +256,26 @@ namespace theseus {
         void convert_path(
             Alignment &backtrace,
             std::vector<int> &poa_path,
-            Graph &compacted_G
+            Graph &compacted_G,
+            int  pivot_column,
+            bool is_end_to_end,
+            bool is_reversed
         ) {
-            // First vertex
-            poa_path.push_back(_first_poa_vtx[backtrace.path[0]]);
+            // First vertex (add it because it is empty)
+            if (!is_reversed || is_end_to_end) {
+                poa_path.push_back(_first_poa_vtx[backtrace.path[0]]);
+            }
+            else {
+                int first_poa_vtx = _first_poa_vtx[backtrace.path[0]];
+                int node_size = compacted_G.node_size(backtrace.path[0]);
+                // Add fake start node
+                poa_path.push_back(-1);
+                for (int k = pivot_column; k < node_size; ++k) {
+                    poa_path.push_back(first_poa_vtx + k);
+                }
+            }
             // Convert the path to a path in the poa graph
-            for (int l = 0; l < backtrace.path.size(); ++l) {
+            for (int l = 1; l < backtrace.path.size() - 1; ++l) {
                 int first_poa_vtx = _first_poa_vtx[backtrace.path[l]];
                 // Add all internal vertices
                 int node_size = compacted_G.node_size(backtrace.path[l]);
@@ -265,8 +283,22 @@ namespace theseus {
                     poa_path.push_back(first_poa_vtx + k);
                 }
             }
-            // Last vertex
-            poa_path.push_back(_first_poa_vtx[backtrace.path[backtrace.path.size() - 1]]);
+            // Last vertex (add it because it is empty)
+            if (is_reversed || is_end_to_end) {
+                poa_path.push_back(_first_poa_vtx[backtrace.path[backtrace.path.size() - 1]]);
+            }
+            else {
+                int first_poa_vtx = _first_poa_vtx[backtrace.path[backtrace.path.size() - 1]];
+                for (int k = 0; k < pivot_column; ++k) {
+                    poa_path.push_back(first_poa_vtx + k);
+                }
+                // Add fake end node
+                poa_path.push_back(-1);
+            }
+            // for (int l = 0; l < poa_path.size(); ++l) {
+            //     std::cout << poa_path[l] << " ";
+            // }
+            // std::cout << std::endl;
         }
 
 
@@ -275,23 +307,31 @@ namespace theseus {
             Graph &compacted_G,
             Alignment &backtrace,
             SequenceView new_seq,
-            int seq_ID
+            int seq_ID,
+            int start_column,
+            int weight,
+            bool is_end_to_end,
+            bool is_reversed
         ) {
             // Convert the path to the corresponding path in the poa graph
             std::vector<int> poa_path;
-            convert_path(backtrace, poa_path, compacted_G);
+            convert_path(backtrace, poa_path, compacted_G, start_column, is_end_to_end, is_reversed);
             // Reversed sequences are added "forward". Change access to them
-            new_seq.change_reversed_flag(false);
+            if (is_reversed) {
+                new_seq.change_reversed_flag(false);
+            }
             bool new_node_exists = false;
             NodeId new_node_id;
-            // TODO: revise prev and new poa vertices
-            int i = 0, l = 0, k = 0, prev_v_poa = 0, new_v_poa = 0;
+            int i = 0, l = 0, k = 0, prev_v_poa = poa_path[0], new_v_poa = poa_path[0];
             while (k < backtrace.edit_op.size()) {
                 // std::cout << "k: " << k << std::endl;
                 if (backtrace.edit_op[k] == 'M') {  // Match
                     prev_v_poa = new_v_poa;
                     new_v_poa = poa_path[l + 1];
-                    update_poa_edge(prev_v_poa, new_v_poa, 1, seq_ID, compacted_G);
+                    _poa_vertices[new_v_poa].sequence_IDs.push_back(seq_ID);
+                    _poa_vertices[new_v_poa].weight += weight;
+                    update_poa_edge(prev_v_poa, new_v_poa, compacted_G);
+                    // std::cout << prev_v_poa << " to " << new_v_poa << std::endl;
                     i += 1;
                     l += 1;
                     new_node_exists = false;
@@ -299,15 +339,17 @@ namespace theseus {
                 else if (backtrace.edit_op[k] == 'X') { // Mismatch
                     prev_v_poa = new_v_poa;
                     new_v_poa = poa_path[l + 1];
-                    update_poa_vertex(new_v_poa, new_node_id, new_seq[i], new_node_exists, compacted_G);
-                    update_poa_edge(prev_v_poa, new_v_poa, 1, seq_ID, compacted_G);
+                    update_poa_vertex(new_v_poa, new_node_id, new_seq[i], new_node_exists, compacted_G, seq_ID, weight);
+                    update_poa_edge(prev_v_poa, new_v_poa, compacted_G);
                     i += 1;
                     l += 1;
                 }
                 else if (backtrace.edit_op[k] == 'D') { // Deletion
                     // Add the new vertex
                     POAVertex new_vertex;
-                    new_vertex.value = new_seq[i];
+                    new_vertex.value  = new_seq[i];
+                    new_vertex.sequence_IDs.push_back(seq_ID);
+                    new_vertex.weight = weight;
                     _poa_vertices.push_back(new_vertex);
                     // Add/update a new compacted node
                     if (new_node_exists) {
@@ -326,7 +368,7 @@ namespace theseus {
                     // Add the new edge
                     prev_v_poa = new_v_poa;
                     new_v_poa  = _poa_vertices.size() - 1;
-                    update_poa_edge(prev_v_poa, new_v_poa, 1, seq_ID, compacted_G);
+                    update_poa_edge(prev_v_poa, new_v_poa, compacted_G);
                     i += 1;
                 }
                 else {
@@ -335,8 +377,10 @@ namespace theseus {
                 k += 1;
             }
             prev_v_poa = new_v_poa;
-            // TODO: Revise
-            update_poa_edge(prev_v_poa, poa_path[poa_path.size() - 1], 1, seq_ID, compacted_G); // Add the edge to the sink node
+            // Add edge to the sink/source node, as no edit operation covers it?
+            if (is_end_to_end || !is_reversed) {
+                update_poa_edge(prev_v_poa, poa_path[poa_path.size() - 1], compacted_G); // Add the edge to the sink node
+            }
         }
 
 
@@ -344,19 +388,18 @@ namespace theseus {
          * @brief Create the initial POA graph from the initial graph G.
          *
          */
-        void create_initial_graph(theseus::Graph &G)
+        void create_initial_graph(theseus::Graph &G, int initial_weight)
         {
             // Source vertex
             theseus::POAVertex source_v;
             _first_poa_vtx.push_back(0);
             source_v.out_edges.push_back(0);
             source_v.associated_node_compact = 0;
+            source_v.weight = initial_weight;
             _poa_vertices.push_back(source_v);
             theseus::POAEdge source_edge;
             source_edge.source = 0;
             source_edge.destination = 1;
-            source_edge.weight = 1;
-            source_edge.sequence_IDs.push_back(0); // Sequence ID 0
             _poa_edges.push_back(source_edge);
             // Central vertices
             NodeView node_view = G.node(1);
@@ -367,12 +410,12 @@ namespace theseus {
                 new_v.out_edges.push_back(_poa_edges.size());
                 new_v.value = node_view.sequence[l];
                 new_v.associated_node_compact = 1;
+                new_v.weight = initial_weight;
+                new_v.sequence_IDs.push_back(0); // Sequence ID 0
                 _poa_vertices.push_back(new_v);
                 theseus::POAEdge new_edge;
                 new_edge.source = _poa_vertices.size() - 1;
                 new_edge.destination = _poa_vertices.size();
-                new_edge.weight = 1;
-                new_edge.sequence_IDs.push_back(0); // Sequence ID 0
                 _poa_edges.push_back(new_edge);
             }
             // Sink vertex
@@ -380,6 +423,7 @@ namespace theseus {
             _first_poa_vtx.push_back(G.node_size(1) + 1);
             sink_v.in_edges.push_back(_poa_edges.size() - 1);
             sink_v.associated_node_compact = 2;
+            sink_v.weight = initial_weight;
             _poa_vertices.push_back(sink_v);
             // Set the end vertex of the POA graph
             _end_vtx_poa = _poa_vertices.size() - 1;
@@ -391,7 +435,7 @@ namespace theseus {
          * @param output_file
          */
         void poa_to_fasta(int num_sequences, std::ofstream &out_file) {
-            // Create an augmented graph to ensure MSA integrity
+            // Create an augmented graph to ensure MSA integrity (to ensure valid topological order)
             POAGraph augmented_poa_graph;
             augmented_poa_graph._poa_vertices = _poa_vertices;
             augmented_poa_graph._poa_edges = _poa_edges;
@@ -478,18 +522,14 @@ namespace theseus {
             std::vector<std::vector<char>> msa(rows, std::vector<char>(columns, '-'));
 
             // Fill the MSA with the aligned sequences (except first and last nodes)
-            for (int l = 0; l < _poa_vertices.size(); ++l) {
+            for (int l = 1; l < _poa_vertices.size(); ++l) {
                 POAVertex &vertex = augmented_poa_graph._poa_vertices[l];
-                int column = node_to_column[l];
+                if (l != _end_vtx_poa) {
+                    int column = node_to_column[l];
 
-                // Check all incoming edges to fill the MSA
-                for (int edge_idx : vertex.in_edges) {
-                    POAEdge &edge = augmented_poa_graph._poa_edges[edge_idx];
-
-                    // Find the sequence IDs of the edge
-                    for (int l = 0; l < edge.sequence_IDs.size(); ++l) {
-                        int seq_id = edge.sequence_IDs[l];
-
+                    // Find the sequence IDs of the node
+                    for (int k = 0; k < vertex.sequence_IDs.size(); ++k) {
+                        int seq_id = vertex.sequence_IDs[k];
                         // Fill the MSA with the value of the vertex
                         msa[seq_id][column] = vertex.value;
                     }
@@ -527,9 +567,10 @@ namespace theseus {
                 int next_vertex = -1;
                 for (int edge_idx : vertex.out_edges) {
                     POAEdge &edge = _poa_edges[edge_idx];
-                    if (edge.weight > max_weight) {
-                        max_weight = edge.weight;
-                        next_vertex = edge.destination;
+                    int destination_vtx = edge.destination;
+                    if (_poa_vertices[destination_vtx].weight > max_weight) {
+                        max_weight = _poa_vertices[destination_vtx].weight;
+                        next_vertex = destination_vtx;
                     }
                 }
 

@@ -60,19 +60,22 @@ class TheseusAlignerImpl {
 public:
     TheseusAlignerImpl(const Penalties &penalties,
                        const Heuristics &heuristics,
-                       Graph &&graph);
+                       Graph &&graph,
+                       int initial_weight);
 
     /**
      * @brief Main alignment function. Aligns the given sequence to the graph
      * starting at the specified node and offset.
      *
-     * @param seq               Sequence to be aligned
+     * @param seq                Sequence to be aligned
+     * @param weight             Weight of the sequence to be aligned (used for MSA)
      * @param reverse_alignment  Whether to perform reverse alignment
      * @param is_ends_free       Whether to allow a free end on the "end" of the graph
      *
      * @return                  Alignment object
      */
     Alignment align(std::string_view seq,
+                    int weight = 1,
                     bool reverse_alignment = false,
                     bool is_ends_free = false);
 
@@ -393,6 +396,7 @@ private:
     bool _ends_free;
     bool _reversed_alignment;
     int _end_node;
+    int _start_column;
     int _seq_ID = 0;
     NodeId _start_node;
     int _start_offset;

@@ -52,12 +52,12 @@ Then, create and configure a MSA aligner object. This object is defined by three
 ```
 theseus::Penalties penalties(match, mismatch, gap_open, gap_extend);
 theseus::Heuristics heuristics(use_lag_pruning, use_density_drop);
-theseus::TheseusMSA aligner(penalties, heuristics, initial_sequence, is_ends_free);
+theseus::TheseusMSA aligner(penalties, heuristics, initial_sequence, weight, is_ends_free);
 ```
 
 Once this is done, we can start adding sequences to our POA graph using the align functionality, that returns an Alignment object with CIGAR, path, and score information. Each time that you call the aligner, you have to provide three parameters: 1) The sequence to be aligned to the poa graph, 2) A boolean variable indicating whether you want the alignment to go forward (source to sink) or reverse (sink to source), and 3) A boolean variable indicating whether you want the alignment to be end to end or having a free end at the "end" of the graph:
 ```
-theseus::Alignment alignment_object = aligner.align(sequence, align_reverse, is_ends_free);
+theseus::Alignment alignment_object = aligner.align(sequence, weight, align_reverse, is_ends_free);
 ```
 
 Each time a new sequence is added to the POA graph, the graph is updated with the newly found variation (all the insertions, deletions and mismatches of the resulting alignment object).

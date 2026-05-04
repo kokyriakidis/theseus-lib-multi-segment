@@ -37,6 +37,7 @@ using NodeId = Graph::NodeId;
 TheseusMSA::TheseusMSA(const Penalties &penalties,
                        const Heuristics &heuristics,
                        std::string_view seq,
+                       int initial_weight,
                        bool is_ends_free) {
 
     // Error out if the sequence is ends_free. Ask for a backbone (end-to-end)
@@ -53,7 +54,7 @@ TheseusMSA::TheseusMSA(const Penalties &penalties,
     G.add_edge(source_node_id, central_node_id);
     G.add_edge(central_node_id, sink_node_id);
     // Construct the aligner implementation
-    msa_aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(G));
+    msa_aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(G), initial_weight);
 }
 
 /**
@@ -72,6 +73,7 @@ TheseusMSA::~TheseusMSA() {}
  */
 Alignment TheseusMSA::align(
     std::string_view seq,
+    int weight,
     bool reverse_alignment,
     bool is_ends_free) {
 
@@ -81,7 +83,7 @@ Alignment TheseusMSA::align(
     }
     // Update the still_end_to_end value
     still_end_to_end = !is_ends_free;
-    return msa_aligner_impl_->align(seq, reverse_alignment, is_ends_free);
+    return msa_aligner_impl_->align(seq, weight, reverse_alignment, is_ends_free);
 }
 
 /**
