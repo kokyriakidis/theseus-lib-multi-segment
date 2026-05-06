@@ -102,6 +102,13 @@ public:
     std::string get_consensus_sequence();
 
     /**
+     * @brief Get the weighted majority voting consensus sequence from the current
+     * MSA.
+     *
+     */
+    std::string get_majority_voting_consensus_sequence();
+
+    /**
      * @brief Print the graph in dot (graphviz) format
      *
      */

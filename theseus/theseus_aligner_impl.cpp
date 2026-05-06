@@ -739,6 +739,8 @@ void TheseusAlignerImpl::backtrace()
  */
 void TheseusAlignerImpl::print_code_graphviz_internal(std::ofstream &out_stream)
 {
+    // TODO: What if we wanted to print reversed?
+    _reversed_alignment = false;
     out_stream << "digraph G {" << std::endl;
     // Print nodes
     for (NodeId id : _graph.nodes())
@@ -808,6 +810,10 @@ std::string TheseusAlignerImpl::get_consensus_sequence() {
   return _poa_graph->poa_to_consensus();
 }
 
+// Find and return the consensus sequence using weighted majority voting
+std::string TheseusAlignerImpl::get_majority_voting_consensus_sequence() {
+  return _poa_graph->poa_to_consensus_weighted_majority_voting(_seq_ID);
+}
 
 // Print as GAF
 void TheseusAlignerImpl::print_as_gaf(

@@ -103,6 +103,12 @@ namespace theseus
          */
         std::string get_consensus_sequence();
 
+        /**
+         * @brief Return weighted majority voting consensus sequence.
+         *
+         */
+        std::string get_majority_voting_consensus_sequence();
+
 
         /**
          * @brief Print in graphviz format.

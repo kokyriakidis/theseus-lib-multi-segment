@@ -69,6 +69,9 @@ namespace theseus {
         std::vector<POAVertex> _poa_vertices;
         std::vector<POAEdge> _poa_edges;
         std::vector<int> _first_poa_vtx; // For each vertex in the compacted graph, the first POA vertex associated to it
+        std::vector<int> _seq_weights;
+        std::vector<int> _seq_starts;
+        std::vector<int> _seq_ends;
         int _end_vtx_poa;
 
 
@@ -381,6 +384,16 @@ namespace theseus {
             if (is_end_to_end || !is_reversed) {
                 update_poa_edge(prev_v_poa, poa_path[poa_path.size() - 1], compacted_G); // Add the edge to the sink node
             }
+            // Update sequence weight, start poa vertex and end poa vertex
+            _seq_weights.push_back(weight);
+            if (new_seq.size() > 0) {
+                _seq_starts.push_back(poa_path[1]);
+                _seq_ends.push_back(prev_v_poa);
+            }
+            else {
+                _seq_starts.push_back(-1);
+                _seq_ends.push_back(-1);
+            }
         }
 
 
@@ -396,6 +409,7 @@ namespace theseus {
             source_v.out_edges.push_back(0);
             source_v.associated_node_compact = 0;
             source_v.weight = initial_weight;
+            source_v.value = '-';
             _poa_vertices.push_back(source_v);
             theseus::POAEdge source_edge;
             source_edge.source = 0;
@@ -424,17 +438,31 @@ namespace theseus {
             sink_v.in_edges.push_back(_poa_edges.size() - 1);
             sink_v.associated_node_compact = 2;
             sink_v.weight = initial_weight;
+            sink_v.value = '-';
             _poa_vertices.push_back(sink_v);
             // Set the end vertex of the POA graph
             _end_vtx_poa = _poa_vertices.size() - 1;
+
+            // Update start poa vertex, end poa vertex and sequence weight
+            if (G.node_size(1) > 0) {
+                _seq_weights.push_back(initial_weight);
+                _seq_starts.push_back(1);
+                _seq_ends.push_back(G.node_size(1));
+            }
+            else {
+                _seq_weights.push_back(initial_weight);
+                _seq_starts.push_back(-1);
+                _seq_ends.push_back(-1);
+            }
         }
+
 
         /**
          * @brief Convert the POA graph to a FASTA file (MSA format)
          *
          * @param output_file
          */
-        void poa_to_fasta(int num_sequences, std::ofstream &out_file) {
+        std::vector<std::vector<char>> poa_to_fasta_impl(int num_sequences) {
             // Create an augmented graph to ensure MSA integrity (to ensure valid topological order)
             POAGraph augmented_poa_graph;
             augmented_poa_graph._poa_vertices = _poa_vertices;
@@ -536,18 +564,24 @@ namespace theseus {
                 }
             }
 
+            return msa;
+        }
+
+
+        void poa_to_fasta(int num_sequences, std::ofstream &out_file) {
+            std::vector<std::vector<char>> msa = poa_to_fasta_impl(num_sequences);
+
             // Print the result in the output file
             if (!out_file.is_open()) {
                 throw std::runtime_error("Could not open output file for writing MSA.");
             }
-            for (int i = 0; i < rows; ++i) {
+            for (int i = 0; i < msa.size(); ++i) {
                 out_file << ">Sequence_" << i + 1 << "\n"; // Sequence ID
-                for (int j = 1; j < columns - 1; ++j) {
+                for (int j = 0; j < msa[i].size(); ++j) {
                     out_file << msa[i][j];
                 }
                 out_file << "\n"; // New line after each sequence
             }
-            out_file.close();
         }
 
         /**
@@ -587,6 +621,171 @@ namespace theseus {
                 current_vertex = next_vertex;
             }
 
+            // Elimimate last character, corresponding to the sink node
+            if (!consensus_sequence.empty()) {
+                consensus_sequence.pop_back();
+            }
+            return consensus_sequence;
+        }
+
+        /**
+         * @brief Print the consensus sequence of the POA graph based on the majority
+         * voting algorithm. The algorithm works as follows:
+         * 1) You topologically order the vertices of the augmented POA graph (with
+         * extra edges between aligned nodes) using DFS.
+         * 2) You assign a column index to each vertex in the MSA representation.
+         * 3) During alignment, you have stored the start and end poa vertices
+         * for each sequence, along with its weight.
+         * 4) With these values, you can determine, for each column, the wighted number
+         * of sequences that are valid in that column. That is, the number of weighted
+         * sequences whose interval of valid columns includes the column you are
+         * looking at.
+         * 4) The consensus sequence has a base pair per column where more than half
+         * of the weighted sequences do not have a gap there. The base pair is
+         * the one with the highest weight among the vertices in that column.
+         *
+         */
+        std::string poa_to_consensus_weighted_majority_voting(int num_sequences) {
+            // Create an augmented graph to ensure MSA integrity (to ensure valid topological order)
+            POAGraph augmented_poa_graph;
+            augmented_poa_graph._poa_vertices = _poa_vertices;
+            augmented_poa_graph._poa_edges = _poa_edges;
+
+            // Given an edge e = (v1, v2), add an extra edge per aliged pair of
+            // the aligned nodes to v1 and v2. That is, new_e = (w1, w2) where
+            // w1 and w2 are aligned nodes to v1 and v2, respectively.
+            int num_original_edges = augmented_poa_graph._poa_edges.size();
+            for (int l = 0; l < num_original_edges; ++l) {
+                POAEdge &edge = augmented_poa_graph._poa_edges[l];
+
+                // For each edge, add an extra edge for each aligned pair
+                POAVertex &source_vertex = augmented_poa_graph._poa_vertices[edge.source];
+                POAVertex &destination_vertex = augmented_poa_graph._poa_vertices[edge.destination];
+                for (int i = 0; i < source_vertex.associated_vtxs.size(); ++i) {
+                    int aligned_source = source_vertex.associated_vtxs[i];
+
+                    for (int j = 0; j < destination_vertex.associated_vtxs.size(); ++j) {
+                        int aligned_destination = destination_vertex.associated_vtxs[j];
+
+                        // Create a new edge between the aligned nodes
+                        POAEdge new_edge;
+                        new_edge.source = aligned_source;
+                        new_edge.destination = aligned_destination;
+                        augmented_poa_graph._poa_edges.push_back(new_edge);
+
+                        // Add the information to the vertices
+                        augmented_poa_graph._poa_vertices[aligned_source].out_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
+                        augmented_poa_graph._poa_vertices[aligned_destination].in_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
+                    }
+                }
+            }
+
+            // Topologically order the vertices using DFS
+            std::vector<bool> visited(augmented_poa_graph._poa_vertices.size(), false);
+            std::stack<int> topo_stack;
+
+            // Recursive dfs
+            std::function<void(int)> dfs = [&](int v) {
+                visited[v] = true;
+                for (int edge_idx : augmented_poa_graph._poa_vertices[v].out_edges) {
+                    int next_v = augmented_poa_graph._poa_edges[edge_idx].destination;
+                    if (!visited[next_v]) {
+                        dfs(next_v);
+                    }
+                }
+                topo_stack.push(v);
+            };
+
+            // Perform DFS for all vertices starting in the source vertex
+            dfs(0);
+
+            // Reverse the stack to get the topological order
+            std::vector<int> topological_order;
+            while (!topo_stack.empty()) {
+                topological_order.push_back(topo_stack.top());
+                topo_stack.pop();
+            }
+
+            // Determine the columns of the nodes in the MSA representation
+            std::vector<int> node_to_column(augmented_poa_graph._poa_vertices.size(), -1);
+            int column_index = 0;
+            for (int v : topological_order) {
+                // Check aligned nodes
+                POAVertex &vertex = augmented_poa_graph._poa_vertices[v];
+                int min_aligned = -1;
+                for (int aligned_v : vertex.associated_vtxs) {
+                    if (node_to_column[aligned_v] != -1) {
+                        min_aligned = node_to_column[aligned_v];
+                    }
+                }
+
+                if (min_aligned != -1) {
+                    node_to_column[v] = min_aligned;  // Assign the column of the aligned node
+                } else {
+                    node_to_column[v] = column_index; // Assign a new column
+                    column_index += 1;
+                }
+            }
+            // Determine column to node mapping
+            std::vector<std::vector<int>> column_to_nodes(column_index);
+            for (int v = 0; v < node_to_column.size(); ++v) {
+                int column = node_to_column[v];
+                if (column != -1) {
+                    column_to_nodes[column].push_back(v);
+                }
+            }
+
+            // Create two vectors indicating the weighted number of sequences that
+            // start and end in each column, respectively
+            std::vector<int> seq_starts_in_column(column_index, 0);
+            std::vector<int> seq_ends_in_column(column_index, 0);
+            // The data on the start and end poa vertices is in:
+            //    - std::vector<int> _seq_starts;
+            //    - std::vector<int> _seq_ends;
+            for (int i = 0; i < num_sequences; ++i) {
+                int start_column = node_to_column[_seq_starts[i]];
+                int end_column   = node_to_column[_seq_ends[i]];
+                int weight       = _seq_weights[i];
+                if (start_column != -1) {
+                    seq_starts_in_column[start_column] += weight;
+                }
+                if (end_column != -1) {
+                    seq_ends_in_column[end_column] += weight;
+                }
+            }
+            // Compute the weighted number of sequences that are valid in each column
+            std::vector<int> valid_sequences_in_column(column_index, 0);
+            valid_sequences_in_column[0] = seq_starts_in_column[0];
+            for (int j = 1; j < column_index; ++j) {
+                valid_sequences_in_column[j] = valid_sequences_in_column[j - 1]
+                + seq_starts_in_column[j]       // Newly activated
+                - seq_ends_in_column[j - 1];    // No longer valid
+            }
+
+            // Construct the consensus sequence based on the weighted majority voting
+            std::string consensus_sequence = "";
+            for (int j = 0; j < column_index; ++j) {
+                // Count the number of sequences that do not have a gap in that column
+                int non_gap_weight = 0;
+                for (int v : column_to_nodes[j]) {
+                    non_gap_weight += augmented_poa_graph._poa_vertices[v].weight;
+                }
+                // Check if it is more than half of the valid sequences in that column
+                if (non_gap_weight > valid_sequences_in_column[j] / 2) {
+                    int curr_max_weight = -1;
+                    char curr_consensus_char = '-';
+                    // Find the bp with highest weight
+                    for (int v : column_to_nodes[j]) {
+                        if (augmented_poa_graph._poa_vertices[v].weight > curr_max_weight) {
+                            curr_max_weight = augmented_poa_graph._poa_vertices[v].weight;
+                            curr_consensus_char = augmented_poa_graph._poa_vertices[v].value;
+                        }
+                    }
+                    if (curr_consensus_char != '-') {
+                        consensus_sequence += curr_consensus_char;
+                    }
+                }
+            }
             return consensus_sequence;
         }
     };

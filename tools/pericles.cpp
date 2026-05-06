@@ -133,8 +133,11 @@ void help() {
                  "  -t, --output_type <int>     The output format of the multiple alignment             [default=0=MSA]\n"
                  "                               0: MSA: Standard Multiple Sequence Alignment format,\n"
                  "                               1: GFA: Output the resulting POA graph in GFA format,\n"
-                 "                               2: Consensus: Output the consensus sequence,\n"
-                 "                               3: Dot: Output in .dot format for visualization purposes.\n"
+                 "                               2: Consensus - Heaviest Bundle: Output the consensus sequence \n"
+                 "                                  based on the heaviest bundle algorithm,\n"
+                 "                               3: Consensus - Weighted Majority Voting: Output the consensus \n"
+                 "                                  sequence based on the weighted majority voting algorithm,\n"
+                 "                               4: Dot: Output in .dot format for visualization purposes.\n"
                  "                                       Only tractable for small graphs\n"
                  "  -f, --output <file>         Output file                                             [Required]\n"
                  "  -s, --sequences <file>      Dataset file                                            [Required]\n\n"
@@ -244,9 +247,12 @@ int main(int argc, char *const *argv) {
     } else if (args.output_type == 1) {
         aligner.print_as_gfa(output_file);
     } else if (args.output_type == 2) {
-        std::string consensus = aligner.get_consensus_sequence();
+        std::string consensus = aligner.get_majority_voting_consensus_sequence();
         output_file << ">Consensus\n" << consensus << "\n";
     } else if (args.output_type == 3) {
+        std::string consensus = aligner.get_consensus_sequence();
+        output_file << ">Consensus\n" << consensus << "\n";
+    } else if (args.output_type == 4) {
         aligner.print_as_dot(output_file);
     }
 

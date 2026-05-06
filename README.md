@@ -106,11 +106,14 @@ Usage: pericles [OPTIONS]
                    -t, --output_type <int>     The output format of the multiple alignment             [default=0=MSA]
                                                 0: MSA: Standard Multiple Sequence Alignment format,
                                                 1: GFA: Output the resulting POA graph in GFA format,
-                                                2: Consensus: Output the consensus sequence,
-                                                3: Dot: Output in .dot format for visualization purposes.
+                                                2: Consensus - Heaviest Bundle: Output the consensus sequence
+                                                   based on the heaviest bundle algorithm,
+                                                3: Consensus - Weighted Majority Voting: Output the consensus
+                                                   sequence based on the weighted majority voting algorithm,
+                                                4: Dot: Output in .dot format for visualization purposes.
                                                         Only tractable for small graphs
                    -f, --output <file>         Output file                                             [Required]
-                   -s, --sequences <file>      Dataset file                                            [Required]"
+                   -s, --sequences <file>      Dataset file                                            [Required]
 
                   Heuristics:\n"
                    -d  --density_heuristic     Activate the drop heuristic based on advancement density.

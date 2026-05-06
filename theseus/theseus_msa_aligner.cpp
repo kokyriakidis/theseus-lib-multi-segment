@@ -111,6 +111,14 @@ std::string TheseusMSA::get_consensus_sequence() {
 }
 
 /**
+ * @brief Print the weighted majority voting consensus.
+ *
+ */
+std::string TheseusMSA::get_majority_voting_consensus_sequence() {
+    return msa_aligner_impl_->get_majority_voting_consensus_sequence();
+}
+
+/**
  * @brief Print in graphviz format.
  *
  */
