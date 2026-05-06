@@ -247,10 +247,10 @@ int main(int argc, char *const *argv) {
     } else if (args.output_type == 1) {
         aligner.print_as_gfa(output_file);
     } else if (args.output_type == 2) {
-        std::string consensus = aligner.get_majority_voting_consensus_sequence();
+        std::string consensus = aligner.get_consensus_sequence();
         output_file << ">Consensus\n" << consensus << "\n";
     } else if (args.output_type == 3) {
-        std::string consensus = aligner.get_consensus_sequence();
+        std::string consensus = aligner.get_majority_voting_consensus_sequence();
         output_file << ">Consensus\n" << consensus << "\n";
     } else if (args.output_type == 4) {
         aligner.print_as_dot(output_file);
