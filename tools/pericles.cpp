@@ -213,8 +213,8 @@ int main(int argc, char *const *argv) {
     }
 
     // Check ouput type is correct
-    if (args.output_type < 0 || args.output_type > 3) {
-        std::cerr << "Output type must be 0 (MSA), 1 (GFA), 2 (Consensus) or 3 (Dot)\n";
+    if (args.output_type < 0 || args.output_type > 4) {
+        std::cerr << "Output type must be 0 (MSA), 1 (GFA), 2 (Consensus), 3 (Majority Voting Consensus) or 4 (Dot)\n";
         return 1;
     }
 

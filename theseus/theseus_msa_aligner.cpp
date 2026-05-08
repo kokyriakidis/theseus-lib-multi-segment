@@ -90,7 +90,7 @@ Alignment TheseusMSA::align(
  * @brief Print the current POA graph in MSA format.
  *
  */
-void TheseusMSA::print_as_gfa(std::ofstream &out_stream) {
+void TheseusMSA::print_as_gfa(std::ostream &out_stream) {
     msa_aligner_impl_->print_as_gfa(out_stream);
 }
 
@@ -98,7 +98,7 @@ void TheseusMSA::print_as_gfa(std::ofstream &out_stream) {
  * @brief Print the current POA graph in MSA format.
  *
  */
-void TheseusMSA::print_as_msa(std::ofstream &out_stream) {
+void TheseusMSA::print_as_msa(std::ostream &out_stream) {
     msa_aligner_impl_->print_as_msa(out_stream);
 }
 
@@ -122,7 +122,7 @@ std::string TheseusMSA::get_majority_voting_consensus_sequence() {
  * @brief Print in graphviz format.
  *
  */
-void TheseusMSA::print_as_dot(std::ofstream &out_stream) {
+void TheseusMSA::print_as_dot(std::ostream &out_stream) {
     msa_aligner_impl_->print_code_graphviz(out_stream);
 }
 

@@ -568,16 +568,12 @@ namespace theseus {
         }
 
 
-        void poa_to_fasta(int num_sequences, std::ofstream &out_file) {
+        void poa_to_fasta(int num_sequences, std::ostream &out_file)
+        {
             std::vector<std::vector<char>> msa = poa_to_fasta_impl(num_sequences);
-
-            // Print the result in the output file
-            if (!out_file.is_open()) {
-                throw std::runtime_error("Could not open output file for writing MSA.");
-            }
             for (int i = 0; i < msa.size(); ++i) {
                 out_file << ">Sequence_" << i + 1 << "\n"; // Sequence ID
-                for (int j = 0; j < msa[i].size(); ++j) {
+                for (int j = 1; j < msa[i].size() - 1; ++j) {
                     out_file << msa[i][j];
                 }
                 out_file << "\n"; // New line after each sequence

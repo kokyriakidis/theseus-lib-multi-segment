@@ -84,14 +84,14 @@ cd build/tools/
 **[IMPORTANT]**
 The *.fasta* file containing sequences has a special structure. As all .fasta files, the data associated to each sequence has two parts: 1) A line starting with ">" containing metadata, and 2) the sequence itself, that appears on the next lines.
 
-1) Constists of two elements: ">" and two boolean values (0 or 1) indicating 1) whether the associated read should be mapped in the canonical direction (from left to right and from source to sink) or in the reverse direction (from right to left and from sink to source), and 2) whether the added sequence has one free end on the graph or not.
+1) Constists of three elements: ">" and three values. The first two are boolean values (0 or 1) indicating **1)** whether the associated read should be mapped in the canonical direction (from left to right and from source to sink) or in the reverse direction (from right to left and from sink to source), and **2)** whether the added sequence has one free end on the graph or not. The third value **3)** indicates the weight of the associated sequence.
 2) Contains the sequence itself.
 
-Examples aligning in the canonical direction using the end-to-end alignment and in the reversed direction using the ends free mode:
+The following example shows a first sequence that should be aligned in the canonical direction, using the end-to-end alignment, and with weight 1. The second sequence should be aligned in the reversed direction, using the ends free mode, and has an associated weight of 2:
 ```
-> 0 0
+> 0 0 1
 ACCT
-> 1 1
+> 1 1 2
 TCCAT
 ```
 

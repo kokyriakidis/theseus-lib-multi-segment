@@ -87,14 +87,14 @@ namespace theseus
          * @brief Print the current POA graph as a GFA file.
          *
          */
-        void print_as_gfa(std::ofstream &out_stream);
+        void print_as_gfa(std::ostream &out_stream);
 
 
         /**
          * @brief Print the current POA graph in MSA format.
          *
          */
-        void print_as_msa(std::ofstream &out_stream);
+        void print_as_msa(std::ostream &out_stream);
 
 
         /**
@@ -114,7 +114,7 @@ namespace theseus
          * @brief Print in graphviz format.
          *
          */
-        void print_as_dot(std::ofstream &out_stream);
+        void print_as_dot(std::ostream &out_stream);
 
 
     private:

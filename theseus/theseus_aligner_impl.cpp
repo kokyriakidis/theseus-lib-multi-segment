@@ -737,7 +737,7 @@ void TheseusAlignerImpl::backtrace()
  *
  * @param G
  */
-void TheseusAlignerImpl::print_code_graphviz_internal(std::ofstream &out_stream)
+void TheseusAlignerImpl::print_code_graphviz_internal(std::ostream &out_stream)
 {
     // TODO: What if we wanted to print reversed?
     _reversed_alignment = false;
@@ -764,15 +764,14 @@ void TheseusAlignerImpl::print_code_graphviz_internal(std::ofstream &out_stream)
     }
     out_stream << "}" << std::endl;
 }
-void TheseusAlignerImpl::print_code_graphviz(std::ofstream &out_stream) {
+void TheseusAlignerImpl::print_code_graphviz(std::ostream &out_stream) {
   print_code_graphviz_internal(out_stream);
 }
 
 // Print as GFA
 void TheseusAlignerImpl::print_as_gfa_internal(
-  std::ofstream &gfa_output)
+  std::ostream &gfa_output)
 {
-    if (!gfa_output.is_open()) throw std::runtime_error("Could not open output file");
     // Print all nodes as Segments
     for (NodeId id : _graph.nodes())
     {
@@ -791,16 +790,15 @@ void TheseusAlignerImpl::print_as_gfa_internal(
           << id << "\t+\t" << "0M\n";
       }
     }
-    gfa_output.close();
 }
 // TODO: Using node names?
-void TheseusAlignerImpl::print_as_gfa(std::ofstream &gfa_output)
+void TheseusAlignerImpl::print_as_gfa(std::ostream &gfa_output)
 {
   print_as_gfa_internal(gfa_output);
 }
 
 // Print as msa (can only call from TheseusMSA)
-void TheseusAlignerImpl::print_as_msa(std::ofstream &out_stream) {
+void TheseusAlignerImpl::print_as_msa(std::ostream &out_stream) {
   _poa_graph->poa_to_fasta(_seq_ID, out_stream);
 }
 

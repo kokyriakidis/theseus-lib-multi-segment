@@ -85,14 +85,14 @@ public:
      * @param gfa_output  Output stream to write the graph in GFA format
      * @param node_names  Vector containing the names of the nodes in the graph (in the same order as their IDs)
      */
-    void print_as_gfa(std::ofstream &gfa_output);
+    void print_as_gfa(std::ostream &gfa_output);
 
     /**
      * @brief Output the current MSA in MSA format.
      *
      * @param out_stream  Output stream to write the MSA in MSA format
      */
-    void print_as_msa(std::ofstream &out_stream);
+    void print_as_msa(std::ostream &out_stream);
 
     /**
      * @brief Return the consensus sequence from the current MSA.
@@ -112,7 +112,7 @@ public:
      * @brief Print the graph in dot (graphviz) format
      *
      */
-    void print_code_graphviz(std::ofstream &out_stream);
+    void print_code_graphviz(std::ostream &out_stream);
 
     /**
      * @brief Print the resulting alignment in GAF format.
@@ -378,14 +378,14 @@ private:
      *
      * @param gfa_output
      */
-    void print_as_gfa_internal(std::ofstream &gfa_output);
+    void print_as_gfa_internal(std::ostream &gfa_output);
 
     /**
      * @brief Internal function to print the graph in dot (graphviz) format.
      *
      * @param out_stream Output stream to write the graph in dot format
      */
-    void print_code_graphviz_internal(std::ofstream &out_stream);
+    void print_code_graphviz_internal(std::ostream &out_stream);
 
     // Handle reverse alignment
     NodeView get_node(NodeId id);
