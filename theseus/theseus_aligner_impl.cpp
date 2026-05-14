@@ -35,9 +35,9 @@ TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
                                        const Heuristics &heuristics,
                                        Graph &&graph,
                                        int initial_weight) :  _penalties(penalties),
+                                                              _internal_penalties(penalties),
                                                               _heuristics(heuristics),
                                                               _graph(std::move(graph)),
-                                                              _internal_penalties(penalties),
                                                               _seq("", false) {
     // TODO: Gap-linear and dual affine-gap.
     const auto n_scores = std::max({_internal_penalties.gapo() +_internal_penalties.gape(),
@@ -91,10 +91,7 @@ void TheseusAlignerImpl::new_alignment(SequenceView seq,
     // Set initial alignment status
     _alignment.theseus_status = THESEUS_STATUS_OK;
     // Set heuristics
-    const auto n_scores = std::max({_internal_penalties.gapo() +_internal_penalties.gape(),
-                                  _internal_penalties.gapo() +_internal_penalties.gape(),
-                                  _internal_penalties.mism()}) + 1;
-    _heuristics.new_alignment(n_scores, _internal_penalties.mism(), _internal_penalties.gape(), _seq.size());
+    _heuristics.new_alignment(_internal_penalties.gape(), _seq.size());
     // TODO: Allow for different initial conditions. Now only global alignment.
     Cell init_condition;
     init_condition.offset = 0;
@@ -192,10 +189,13 @@ Alignment TheseusAlignerImpl::align(
   _seq_ID += 1;
   if (_alignment.theseus_status == THESEUS_STATUS_ALG_COMPLETED) {
     backtrace();
-    int start_column = _reversed_alignment ? 
+    int start_column = _reversed_alignment ?
                        _graph.node_size(_start_pos.vertex_id) - (_start_pos.offset + _start_pos.diag) :
                        _start_pos.offset + _start_pos.diag;
-    _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, weight, !_ends_free, _reversed_alignment);
+    int start_row = _reversed_alignment ?
+                    _seq.size() - _start_pos.offset :
+                    0;
+    _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, !_ends_free, _reversed_alignment);
   }
   else {
     // Error messages
@@ -209,10 +209,13 @@ Alignment TheseusAlignerImpl::align(
       init_partial_backtrace();
       // Perform partial backtrace
       backtrace();
-      int start_column = _reversed_alignment ? 
+      int start_column = _reversed_alignment ?
                        _graph.node_size(_start_pos.vertex_id) - (_start_pos.offset + _start_pos.diag) :
                        _start_pos.offset + _start_pos.diag;
-      _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, weight, !_ends_free, _reversed_alignment);
+      int start_row = _reversed_alignment ?
+                    _seq.size() - _start_pos.offset :
+                    0;
+      _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, !_ends_free, _reversed_alignment);
     }
   }
   return _alignment;
@@ -512,14 +515,15 @@ void TheseusAlignerImpl::check_and_store_jumps(
     Cell::CellVector &curr_wavefront,
     Scope::range cell_range)
 {
-  Cell::pos_t len = cell_range.end - cell_range.start, diag, offset, curr_j, n = curr_node.sequence.size(), prev_pos;
+  Cell::pos_t len = cell_range.end - cell_range.start, n = curr_node.sequence.size(), prev_pos;
+  Cell::idx2d_t diag, offset, curr_j;
   Cell::Matrix from_matrix;
   // Check all difaonals in the current wavefront
   for (int l = 0; l < len; ++l) {
     diag = curr_wavefront[cell_range.start + l].diag;
     offset = curr_wavefront[cell_range.start + l].offset;
     curr_j = diag + offset;
-    if (curr_j == n && offset <= _seq.size()) {
+    if (curr_j == n && offset <= (int)_seq.size()) {
       from_matrix = curr_wavefront[cell_range.start + l].from_matrix;
       prev_pos = curr_wavefront[cell_range.start + l].prev_pos;
       store_M_jump(curr_node, curr_wavefront[cell_range.start + l], prev_pos, from_matrix);
@@ -552,14 +556,14 @@ void TheseusAlignerImpl::check_end_condition(
 {
   // Ends free
   if (_ends_free) {
-    if (curr_data.offset == _seq.size() || curr_data.vertex_id == _end_node) {
+    if (curr_data.offset == (int)_seq.size() || curr_data.vertex_id == _end_node) {
     _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
     _start_pos = curr_data;
     }
   }
   // End to end
   else {
-    if (curr_data.offset == _seq.size() && curr_data.vertex_id == _end_node) {
+    if (curr_data.offset == (int)_seq.size() && curr_data.vertex_id == _end_node) {
       _alignment.theseus_status = THESEUS_STATUS_ALG_COMPLETED;
       _start_pos = curr_data;
     }
@@ -591,7 +595,7 @@ void TheseusAlignerImpl::extend_diagonal(
   //           << ", cond3 (has_out): " << has_out_nodes(curr_node_id)
   //           << ", all_true: " << (j == curr_node.sequence.size() && curr_cell.offset <= _seq.size() && has_out_nodes(curr_node_id))
   //           << std::endl;
-  if (j == curr_node.sequence.size() && curr_cell.offset <= _seq.size() && has_out_nodes(curr_node_id)) {
+  if (j == (int)curr_node.sequence.size() && curr_cell.offset <= (int)_seq.size() && has_out_nodes(curr_node_id)) {
     store_M_jump(curr_node, prev_cell, prev_pos, from_matrix); // Store the jump in neighbours
   }
 }
@@ -747,7 +751,7 @@ void TheseusAlignerImpl::print_code_graphviz_internal(std::ostream &out_stream)
     {
       NodeView node = get_node(id);
       out_stream << id << " [label=\"";
-      for (int j = 0; j < node.sequence.size(); ++j)
+      for (size_t j = 0; j < node.sequence.size(); ++j)
       {
           out_stream << node.sequence[j];
       }
@@ -837,13 +841,13 @@ void TheseusAlignerImpl::print_as_gaf(
 
   // Field 6: Alignment path
   out_stream << "\t";
-  for (int l = 0; l < alignment.path.size(); ++l) {
+  for (size_t l = 0; l < alignment.path.size(); ++l) {
     out_stream << ">" << node_names.at(alignment.path[l]); // TODO: Support orientation
   }
 
   // Field 7: Target length
   int target_length = 0;
-  for (int l = 0; l < alignment.path.size(); ++l) {
+  for (size_t l = 0; l < alignment.path.size(); ++l) {
     int node_length = node_names.at(alignment.path[l]).size();
     target_length += node_length;
   }
@@ -857,7 +861,7 @@ void TheseusAlignerImpl::print_as_gaf(
 
   // Field 10: Number of matching bases
   int num_matches = 0;
-  for (int l = 0; l < alignment.edit_op.size(); ++l) {
+  for (size_t l = 0; l < alignment.edit_op.size(); ++l) {
     if (alignment.edit_op[l] == 'M') {
       num_matches += 1;
     }
@@ -874,7 +878,7 @@ void TheseusAlignerImpl::print_as_gaf(
   out_stream << "\t" << "cg:Z:"; // CIGAR string
   std::string cigar = "";
   int count = 1;
-  for (int l = 1; l < alignment.edit_op.size(); ++l) {
+  for (size_t l = 1; l < alignment.edit_op.size(); ++l) {
     if (alignment.edit_op[l] == alignment.edit_op[l - 1]) {
       count += 1;
     }

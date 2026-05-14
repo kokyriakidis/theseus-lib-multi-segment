@@ -396,16 +396,14 @@ private:
     Penalties _penalties;
     InternalPenalties _internal_penalties;
 
-    Graph _graph;   // The graph to align to
-
     std::unique_ptr<POAGraph> _poa_graph; // Partial order alignment graph for MSA
 
     bool _ends_free;
     bool _reversed_alignment;
-    int _end_node;
     int _start_column;
     int _seq_ID = 0;
     NodeId _start_node;
+    NodeId _end_node;
     int _start_offset;
     Cell _start_pos;
 
@@ -416,9 +414,11 @@ private:
 
     std::unique_ptr<VerticesData> _vertices_data;
 
-    SequenceView _seq;
-
     Heuristics _heuristics;
+
+    Graph _graph;   // The graph to align to
+
+    SequenceView _seq;
 
     Alignment _alignment;
 };

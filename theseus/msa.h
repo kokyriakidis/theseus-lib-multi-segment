@@ -72,7 +72,7 @@ namespace theseus {
         std::vector<int> _seq_weights;
         std::vector<int> _seq_starts;
         std::vector<int> _seq_ends;
-        int _end_vtx_poa;
+        NodeId _end_vtx_poa;
 
 
         /**
@@ -166,7 +166,7 @@ namespace theseus {
             bool already_exists = false;
             int vtx;
             char vtx_value;
-            for (int l = 0; l < _poa_vertices[poa_v].associated_vtxs.size(); ++l)
+            for (long unsigned int l = 0; l < _poa_vertices[poa_v].associated_vtxs.size(); ++l)
             {
                 vtx       = _poa_vertices[poa_v].associated_vtxs[l];
                 vtx_value = _poa_vertices[vtx].value;
@@ -190,7 +190,7 @@ namespace theseus {
                 poa_v = _poa_vertices.size() - 1; // poa_v is the vertex that will be used when adding an edge
 
                 // Update the other vertices
-                for (int l = 0; l < new_vertex.associated_vtxs.size(); ++l)
+                for (long unsigned int l = 0; l < new_vertex.associated_vtxs.size(); ++l)
                 {
                     vtx = new_vertex.associated_vtxs[l];
                     _poa_vertices[vtx].associated_vtxs.push_back(poa_v);
@@ -236,7 +236,7 @@ namespace theseus {
             // Check if the edge already exists
             bool already_exists = false;
             int curr_edge;
-            for (int l = 0; l < _poa_vertices[source].out_edges.size(); ++l) {
+            for (long unsigned int l = 0; l < _poa_vertices[source].out_edges.size(); ++l) {
                 curr_edge = _poa_vertices[source].out_edges[l];
                 if (_poa_edges[curr_edge].source == source && _poa_edges[curr_edge].destination == destination) {
                     already_exists = true;
@@ -278,7 +278,7 @@ namespace theseus {
                 }
             }
             // Convert the path to a path in the poa graph
-            for (int l = 1; l < backtrace.path.size() - 1; ++l) {
+            for (long unsigned int l = 1; l < backtrace.path.size() - 1; ++l) {
                 int first_poa_vtx = _first_poa_vtx[backtrace.path[l]];
                 // Add all internal vertices
                 int node_size = compacted_G.node_size(backtrace.path[l]);
@@ -312,6 +312,7 @@ namespace theseus {
             SequenceView new_seq,
             int seq_ID,
             int start_column,
+            int start_row,
             int weight,
             bool is_end_to_end,
             bool is_reversed
@@ -325,7 +326,8 @@ namespace theseus {
             }
             bool new_node_exists = false;
             NodeId new_node_id;
-            int i = 0, l = 0, k = 0, prev_v_poa = poa_path[0], new_v_poa = poa_path[0];
+            long unsigned int k = 0;
+            int i = start_row, l = 0, prev_v_poa = poa_path[0], new_v_poa = poa_path[0];
             while (k < backtrace.edit_op.size()) {
                 // std::cout << "k: " << k << std::endl;
                 if (backtrace.edit_op[k] == 'M') {  // Match
@@ -394,6 +396,7 @@ namespace theseus {
                 _seq_starts.push_back(-1);
                 _seq_ends.push_back(-1);
             }
+            // print_poa_dot();
         }
 
 
@@ -462,7 +465,7 @@ namespace theseus {
          *
          * @param output_file
          */
-        std::vector<std::vector<char>> poa_to_fasta_impl(int num_sequences) {
+        void poa_to_fasta(int num_sequences, std::ostream &out_file) {
             // Create an augmented graph to ensure MSA integrity (to ensure valid topological order)
             POAGraph augmented_poa_graph;
             augmented_poa_graph._poa_vertices = _poa_vertices;
@@ -478,10 +481,10 @@ namespace theseus {
                 // For each edge, add an extra edge for each aligned pair
                 POAVertex &source_vertex = augmented_poa_graph._poa_vertices[edge.source];
                 POAVertex &destination_vertex = augmented_poa_graph._poa_vertices[edge.destination];
-                for (int i = 0; i < source_vertex.associated_vtxs.size(); ++i) {
+                for (long unsigned int i = 0; i < source_vertex.associated_vtxs.size(); ++i) {
                     int aligned_source = source_vertex.associated_vtxs[i];
 
-                    for (int j = 0; j < destination_vertex.associated_vtxs.size(); ++j) {
+                    for (long unsigned int j = 0; j < destination_vertex.associated_vtxs.size(); ++j) {
                         int aligned_destination = destination_vertex.associated_vtxs[j];
 
                         // Create a new edge between the aligned nodes
@@ -494,6 +497,32 @@ namespace theseus {
                         augmented_poa_graph._poa_vertices[aligned_source].out_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
                         augmented_poa_graph._poa_vertices[aligned_destination].in_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
                     }
+                }
+
+                // Add source to aligned destination edges
+                for (size_t j = 0; j < destination_vertex.associated_vtxs.size(); ++j) {
+                    int aligned_destination = destination_vertex.associated_vtxs[j];
+                    // Create a new edge between the source and the aligned destination node
+                    POAEdge new_edge;
+                    new_edge.source = edge.source;
+                    new_edge.destination = aligned_destination;
+                    augmented_poa_graph._poa_edges.push_back(new_edge);
+                    // Add the information to the vertices
+                    source_vertex.out_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
+                    augmented_poa_graph._poa_vertices[aligned_destination].in_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
+                }
+
+                // Add aligned source to destination edges
+                for (size_t i = 0; i < source_vertex.associated_vtxs.size(); ++i) {
+                    int aligned_source = source_vertex.associated_vtxs[i];
+                    // Create a new edge between the aligned source and the destination node
+                    POAEdge new_edge;
+                    new_edge.source = aligned_source;
+                    new_edge.destination = edge.destination;
+                    augmented_poa_graph._poa_edges.push_back(new_edge);
+                    // Add the information to the vertices
+                    augmented_poa_graph._poa_vertices[aligned_source].out_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
+                    destination_vertex.in_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
                 }
             }
 
@@ -514,7 +543,12 @@ namespace theseus {
             };
 
             // Perform DFS for all vertices starting in the source vertex
-            dfs(0);
+            for (size_t v = 0; v < augmented_poa_graph._poa_vertices.size(); ++v) {
+                if (!visited[v]) {
+                    dfs(v);
+                }
+            }
+            // dfs(0);
 
             // Reverse the stack to get the topological order
             std::vector<int> topological_order;
@@ -550,35 +584,31 @@ namespace theseus {
             std::vector<std::vector<char>> msa(rows, std::vector<char>(columns, '-'));
 
             // Fill the MSA with the aligned sequences (except first and last nodes)
-            for (int l = 1; l < _poa_vertices.size(); ++l) {
+            for (size_t l = 1; l < _poa_vertices.size(); ++l) {
                 POAVertex &vertex = augmented_poa_graph._poa_vertices[l];
-                if (l != _end_vtx_poa) {
-                    int column = node_to_column[l];
+                int column = node_to_column[l];
 
-                    // Find the sequence IDs of the node
-                    for (int k = 0; k < vertex.sequence_IDs.size(); ++k) {
-                        int seq_id = vertex.sequence_IDs[k];
-                        // Fill the MSA with the value of the vertex
-                        msa[seq_id][column] = vertex.value;
-                    }
+                // Find the sequence IDs of the node
+                for (size_t k = 0; k < vertex.sequence_IDs.size(); ++k) {
+                    int seq_id = vertex.sequence_IDs[k];
+                    // Fill the MSA with the value of the vertex
+                    msa[seq_id][column] = vertex.value;
                 }
             }
 
-            return msa;
-        }
-
-
-        void poa_to_fasta(int num_sequences, std::ostream &out_file)
-        {
-            std::vector<std::vector<char>> msa = poa_to_fasta_impl(num_sequences);
-            for (int i = 0; i < msa.size(); ++i) {
+            size_t source_id = node_to_column[0];
+            size_t sink_id   = node_to_column[_end_vtx_poa];
+            for (size_t i = 0; i < msa.size(); ++i) {
                 out_file << ">Sequence_" << i + 1 << "\n"; // Sequence ID
-                for (int j = 1; j < msa[i].size() - 1; ++j) {
-                    out_file << msa[i][j];
+                for (size_t j = 0; j < msa[i].size(); ++j) {
+                    if (j != source_id && j != sink_id) {
+                        out_file << msa[i][j];
+                    }
                 }
                 out_file << "\n"; // New line after each sequence
             }
         }
+
 
         /**
          * @brief Print the consensus sequence of the POA graph
@@ -587,7 +617,7 @@ namespace theseus {
         std::string poa_to_consensus() {
             // Apply heaviest bundle algorithm to find the consensus sequence
             std::string consensus_sequence = "";
-            int current_vertex = 0; // Start from the source vertex
+            NodeId current_vertex = 0; // Start from the source vertex
 
             while (current_vertex != _end_vtx_poa) {
                 POAVertex &vertex = _poa_vertices[current_vertex];
@@ -655,24 +685,47 @@ namespace theseus {
                 POAEdge &edge = augmented_poa_graph._poa_edges[l];
 
                 // For each edge, add an extra edge for each aligned pair
-                POAVertex &source_vertex = augmented_poa_graph._poa_vertices[edge.source];
+                POAVertex &source_vertex      = augmented_poa_graph._poa_vertices[edge.source];
                 POAVertex &destination_vertex = augmented_poa_graph._poa_vertices[edge.destination];
-                for (int i = 0; i < source_vertex.associated_vtxs.size(); ++i) {
+                for (long unsigned int i = 0; i < source_vertex.associated_vtxs.size(); ++i) {
                     int aligned_source = source_vertex.associated_vtxs[i];
-
-                    for (int j = 0; j < destination_vertex.associated_vtxs.size(); ++j) {
+                    for (long unsigned int j = 0; j < destination_vertex.associated_vtxs.size(); ++j) {
                         int aligned_destination = destination_vertex.associated_vtxs[j];
-
                         // Create a new edge between the aligned nodes
                         POAEdge new_edge;
                         new_edge.source = aligned_source;
                         new_edge.destination = aligned_destination;
                         augmented_poa_graph._poa_edges.push_back(new_edge);
-
                         // Add the information to the vertices
                         augmented_poa_graph._poa_vertices[aligned_source].out_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
                         augmented_poa_graph._poa_vertices[aligned_destination].in_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
                     }
+                }
+
+                // Add source to aligned destination edges
+                for (size_t j = 0; j < destination_vertex.associated_vtxs.size(); ++j) {
+                    int aligned_destination = destination_vertex.associated_vtxs[j];
+                    // Create a new edge between the source and the aligned destination node
+                    POAEdge new_edge;
+                    new_edge.source = edge.source;
+                    new_edge.destination = aligned_destination;
+                    augmented_poa_graph._poa_edges.push_back(new_edge);
+                    // Add the information to the vertices
+                    source_vertex.out_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
+                    augmented_poa_graph._poa_vertices[aligned_destination].in_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
+                }
+
+                // Add aligned source to destination edges
+                for (size_t i = 0; i < source_vertex.associated_vtxs.size(); ++i) {
+                    int aligned_source = source_vertex.associated_vtxs[i];
+                    // Create a new edge between the aligned source and the destination node
+                    POAEdge new_edge;
+                    new_edge.source = aligned_source;
+                    new_edge.destination = edge.destination;
+                    augmented_poa_graph._poa_edges.push_back(new_edge);
+                    // Add the information to the vertices
+                    augmented_poa_graph._poa_vertices[aligned_source].out_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
+                    destination_vertex.in_edges.push_back(augmented_poa_graph._poa_edges.size() - 1);
                 }
             }
 
@@ -692,8 +745,12 @@ namespace theseus {
                 topo_stack.push(v);
             };
 
-            // Perform DFS for all vertices starting in the source vertex
-            dfs(0);
+            // Perform DFS for all vertices starting in all vertices (to ensure we cover all disconnected components)
+            for (size_t v = 0; v < augmented_poa_graph._poa_vertices.size(); ++v) {
+                if (!visited[v]) {
+                    dfs(v);
+                }
+            }
 
             // Reverse the stack to get the topological order
             std::vector<int> topological_order;
@@ -724,12 +781,19 @@ namespace theseus {
             }
             // Determine column to node mapping
             std::vector<std::vector<int>> column_to_nodes(column_index);
-            for (int v = 0; v < node_to_column.size(); ++v) {
+            for (long unsigned int v = 0; v < node_to_column.size(); ++v) {
                 int column = node_to_column[v];
                 if (column != -1) {
                     column_to_nodes[column].push_back(v);
                 }
             }
+            // for (int j = 0; j < column_index; ++j) {
+            //     std::cout << "Column " << j << ": ";
+            //     for (int v : column_to_nodes[j]) {
+            //         std::cout << v << " ";
+            //     }
+            //     std::cout << "\n";
+            // }
 
             // Create two vectors indicating the weighted number of sequences that
             // start and end in each column, respectively
@@ -758,6 +822,10 @@ namespace theseus {
                 - seq_ends_in_column[j - 1];    // No longer valid
             }
 
+            // for (int j = 0; j < column_index; ++j) {
+            //     std::cout << "Column " << j << ": " << valid_sequences_in_column[j] << " valid sequences\n";
+            // }
+
             // Construct the consensus sequence based on the weighted majority voting
             std::string consensus_sequence = "";
             for (int j = 0; j < column_index; ++j) {
@@ -767,11 +835,13 @@ namespace theseus {
                     non_gap_weight += augmented_poa_graph._poa_vertices[v].weight;
                 }
                 // Check if it is more than half of the valid sequences in that column
+                // std::cout << "Column " << j << ": " << non_gap_weight << " non-gap weight, " << valid_sequences_in_column[j] << " valid sequences\n";
                 if (non_gap_weight > valid_sequences_in_column[j] / 2) {
                     int curr_max_weight = -1;
                     char curr_consensus_char = '-';
                     // Find the bp with highest weight
                     for (int v : column_to_nodes[j]) {
+                        // std::cout << "Vertex " << v << ": value = " << augmented_poa_graph._poa_vertices[v].value << ", weight = " << augmented_poa_graph._poa_vertices[v].weight << "\n";
                         if (augmented_poa_graph._poa_vertices[v].weight > curr_max_weight) {
                             curr_max_weight = augmented_poa_graph._poa_vertices[v].weight;
                             curr_consensus_char = augmented_poa_graph._poa_vertices[v].value;
@@ -783,6 +853,23 @@ namespace theseus {
                 }
             }
             return consensus_sequence;
+        }
+
+        /*
+         * Print the POA graph in DOT format (for debugging purposes)
+        */
+        void print_poa_dot() {
+            std::cout << "digraph POA {\n";
+            for (size_t i = 0; i < _poa_vertices.size(); ++i) {
+                // Print weight
+                std::cout << "  " << i << " [label=\"" << _poa_vertices[i].value << " " << _poa_vertices[i].weight << "\"];\n";
+            }
+            for (size_t i = 0; i < _poa_edges.size(); ++i) {
+                int source = _poa_edges[i].source;
+                int destination = _poa_edges[i].destination;
+                std::cout << "  " << source << " -> " << destination << ";\n";
+            }
+            std::cout << "}\n";
         }
     };
 }

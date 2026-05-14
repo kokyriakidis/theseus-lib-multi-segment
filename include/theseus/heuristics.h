@@ -60,7 +60,7 @@ namespace theseus {
 
 
         // INITIALIZER //
-        void new_alignment(int scope_size, int mismatch, int gape, int seq_len) {
+        void new_alignment(int gape, int seq_len) {
             // General
             _max_offset = 0;
 
