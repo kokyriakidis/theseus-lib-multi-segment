@@ -62,12 +62,24 @@ theseus::Alignment alignment_object = aligner.align(sequence, weight, align_reve
 
 Each time a new sequence is added to the POA graph, the graph is updated with the newly found variation (all the insertions, deletions and mismatches of the resulting alignment object).
 
-Finally, we can output the result in four different formats: a graph in .gfa format, a multiple sequence alignment, a consensus sequence, and a graph in .dot format:
+Finally, we can output the result in four different formats: a multiple sequence alignment, a graph in .gfa format, a consensus sequence, a consensus sequence based on the majority voting algorithm, and a graph in .dot format:
 ```
-aligner.print_as_gfa(output_file);             // Output the compacted POA graph in .gfa format
-aligner.print_as_msa(output_file);             // Output as a Multiple Sequence Alignment
-sequence = aligner.get_consensus_sequence();   // Find the consensus sequence of the alignment
-aligner.print_as_dot(output_file);             // Output the compacted POA graph in .dot format
+// Output as a Multiple Sequence Alignment
+aligner.print_as_msa(output_file);
+
+// Output the compacted POA graph in .gfa format
+aligner.print_as_gfa(output_file);
+
+// Find the consensus sequence of the alignment (Heaviest bundle algorithm)
+sequence = aligner.heaviest_bundle_consensus();
+
+// Find the consensus sequence of the alignment (Majority voting algorithm)
+std::vector<int> consensus_weights;
+std::string consensus_sequence, consensus_sequence_gapped;
+aligner.majority_voting_consensus(consensus_weights, consensus_sequence, consensus_sequence_gapped);
+
+// Output the compacted POA graph in .dot format
+aligner.print_as_dot(output_file);
 ```
 
 
@@ -109,7 +121,9 @@ Usage: pericles [OPTIONS]
                                                 2: Consensus - Heaviest Bundle: Output the consensus sequence
                                                    based on the heaviest bundle algorithm,
                                                 3: Consensus - Weighted Majority Voting: Output the consensus
-                                                   sequence based on the weighted majority voting algorithm,
+                                                   sequence based on the weighted majority voting algorithm.
+                                                   Moreover, it prints each column's weight and the gapped
+                                                   consensus,\n"
                                                 4: Dot: Output in .dot format for visualization purposes.
                                                         Only tractable for small graphs
                    -f, --output <file>         Output file                                             [Required]

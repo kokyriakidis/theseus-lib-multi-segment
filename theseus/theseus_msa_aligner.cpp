@@ -106,16 +106,18 @@ void TheseusMSA::print_as_msa(std::ostream &out_stream) {
  * @brief Return consensus sequence.
  *
  */
-std::string TheseusMSA::get_consensus_sequence() {
-    return msa_aligner_impl_->get_consensus_sequence();
+std::string TheseusMSA::heaviest_bundle_consensus() {
+    return msa_aligner_impl_->heaviest_bundle_consensus();
 }
 
 /**
  * @brief Print the weighted majority voting consensus.
  *
  */
-std::string TheseusMSA::get_majority_voting_consensus_sequence() {
-    return msa_aligner_impl_->get_majority_voting_consensus_sequence();
+void TheseusMSA::majority_voting_consensus(std::vector<int> &consensus_weights,
+                                           std::string &consensus_sequence,
+                                           std::string &consensus_sequence_gapped) {
+    msa_aligner_impl_->majority_voting_consensus(consensus_weights, consensus_sequence, consensus_sequence_gapped);
 }
 
 /**

@@ -101,13 +101,15 @@ namespace theseus
          * @brief Return consensus sequence.
          *
          */
-        std::string get_consensus_sequence();
+        std::string heaviest_bundle_consensus();
 
         /**
-         * @brief Return weighted majority voting consensus sequence.
+         * @brief Compute the weighted majority voting consensus sequence.
          *
          */
-        std::string get_majority_voting_consensus_sequence();
+        void majority_voting_consensus(std::vector<int> &consensus_weights,
+                                       std::string &consensus_sequence,
+                                       std::string &consensus_sequence_gapped);
 
 
         /**

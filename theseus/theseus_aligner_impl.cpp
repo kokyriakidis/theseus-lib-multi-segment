@@ -586,15 +586,6 @@ void TheseusAlignerImpl::extend_diagonal(
   // End condition
   check_end_condition(curr_cell);
   // _graph.print_graph();
-  // std::cout << "curr_node_id: " << curr_node_id << ", offset: " << curr_cell.offset 
-  //           << ", diag: " << curr_cell.diag << ", j: " << j 
-  //           << ", seq_size: " << _seq.size() << ", node_size: " << curr_node.sequence.size()
-  //           << ", has_out: " << has_out_nodes(curr_node_id)
-  //           << ", cond1 (j==node_size): " << (j == curr_node.sequence.size())
-  //           << ", cond2 (offset<=seq_size): " << (curr_cell.offset <= _seq.size())
-  //           << ", cond3 (has_out): " << has_out_nodes(curr_node_id)
-  //           << ", all_true: " << (j == curr_node.sequence.size() && curr_cell.offset <= _seq.size() && has_out_nodes(curr_node_id))
-  //           << std::endl;
   if (j == (int)curr_node.sequence.size() && curr_cell.offset <= (int)_seq.size() && has_out_nodes(curr_node_id)) {
     store_M_jump(curr_node, prev_cell, prev_pos, from_matrix); // Store the jump in neighbours
   }
@@ -808,13 +799,15 @@ void TheseusAlignerImpl::print_as_msa(std::ostream &out_stream) {
 
 
 // Find and return the consensus sequence (can only call from TheseusMSA)
-std::string TheseusAlignerImpl::get_consensus_sequence() {
+std::string TheseusAlignerImpl::heaviest_bundle_consensus() {
   return _poa_graph->poa_to_consensus();
 }
 
 // Find and return the consensus sequence using weighted majority voting
-std::string TheseusAlignerImpl::get_majority_voting_consensus_sequence() {
-  return _poa_graph->poa_to_consensus_weighted_majority_voting(_seq_ID);
+void TheseusAlignerImpl::majority_voting_consensus(std::vector<int> &consensus_weights,
+                                                   std::string &consensus_sequence,
+                                                   std::string &consensus_sequence_gapped) {
+  _poa_graph->poa_to_consensus_weighted_majority_voting(_seq_ID, consensus_weights, consensus_sequence, consensus_sequence_gapped);
 }
 
 // Print as GAF

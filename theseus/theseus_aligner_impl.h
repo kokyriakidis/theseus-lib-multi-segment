@@ -99,14 +99,16 @@ public:
      *
      * @return std::string Consensus sequence
      */
-    std::string get_consensus_sequence();
+    std::string heaviest_bundle_consensus();
 
     /**
      * @brief Get the weighted majority voting consensus sequence from the current
      * MSA.
      *
      */
-    std::string get_majority_voting_consensus_sequence();
+    void majority_voting_consensus(std::vector<int> &consensus_weights,
+                                   std::string &consensus_sequence,
+                                   std::string &consensus_sequence_gapped);
 
     /**
      * @brief Print the graph in dot (graphviz) format

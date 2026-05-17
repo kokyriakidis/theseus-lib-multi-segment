@@ -136,7 +136,9 @@ void help() {
                  "                               2: Consensus - Heaviest Bundle: Output the consensus sequence \n"
                  "                                  based on the heaviest bundle algorithm,\n"
                  "                               3: Consensus - Weighted Majority Voting: Output the consensus \n"
-                 "                                  sequence based on the weighted majority voting algorithm,\n"
+                 "                                  sequence based on the weighted majority voting algorithm. \n"
+                 "                                  Moreover, it prints each column's weight and the gapped \n"
+                 "                                  consensus,\n"
                  "                               4: Dot: Output in .dot format for visualization purposes.\n"
                  "                                       Only tractable for small graphs\n"
                  "  -f, --output <file>         Output file                                             [Required]\n"
@@ -247,11 +249,23 @@ int main(int argc, char *const *argv) {
     } else if (args.output_type == 1) {
         aligner.print_as_gfa(output_file);
     } else if (args.output_type == 2) {
-        std::string consensus = aligner.get_consensus_sequence();
+        std::string consensus = aligner.heaviest_bundle_consensus();
         output_file << ">Consensus\n" << consensus << "\n";
     } else if (args.output_type == 3) {
-        std::string consensus = aligner.get_majority_voting_consensus_sequence();
-        output_file << ">Consensus\n" << consensus << "\n";
+        std::vector<int> consensus_weights;
+        std::string consensus_sequence, consensus_sequence_gapped;
+        aligner.majority_voting_consensus(consensus_weights, consensus_sequence, consensus_sequence_gapped);
+        output_file << ">Consensus\n" << consensus_sequence << "\n";
+        output_file << ">Gapped_consensus\n" << consensus_sequence_gapped << "\n";
+        output_file << ">Consensus_weights\n";
+        for (size_t i = 0; i < consensus_weights.size(); ++i) {
+            output_file << consensus_weights[i];
+            if (i < consensus_weights.size() - 1) {
+                output_file << " ";
+            }
+        }
+        output_file << "\n";
+
     } else if (args.output_type == 4) {
         aligner.print_as_dot(output_file);
     }
