@@ -32,6 +32,7 @@
 #include <string>
 #include <queue>
 #include <set>
+#include <unordered_map>
 #include <algorithm>
 #include <ranges>
 
@@ -61,7 +62,8 @@ public:
     TheseusAlignerImpl(const Penalties &penalties,
                        const Heuristics &heuristics,
                        Graph &&graph,
-                       int initial_weight);
+                       int initial_weight,
+                       NodeId sink_node = 2);
 
     /**
      * @brief Main alignment function. Aligns the given sequence to the graph
@@ -71,13 +73,20 @@ public:
      * @param weight             Weight of the sequence to be aligned (used for MSA)
      * @param reverse_alignment  Whether to perform reverse alignment
      * @param is_ends_free       Whether to allow a free end on the "end" of the graph
+     * @param custom_start_node  If >= 0, use this as the start node instead of
+     *                           the default source/sink. Set to -1 (default) to
+     *                           use the standard MSA start node.
+     * @param custom_start_offset Offset within the custom start node (default 0)
      *
      * @return                  Alignment object
      */
     Alignment align(std::string_view seq,
                     int weight = 1,
                     bool reverse_alignment = false,
-                    bool is_ends_free = false);
+                    bool is_ends_free = false,
+                    int custom_start_node = -1,
+                    int custom_start_offset = 0,
+                    int custom_end_node = -1);
 
     /**
      * @brief Output the current graph in GFA format.
@@ -92,7 +101,14 @@ public:
      *
      * @param out_stream  Output stream to write the MSA in MSA format
      */
-    void print_as_msa(std::ostream &out_stream);
+    void print_as_msa(std::ostream &out_stream, int num_sequences = -1,
+                      const std::vector<std::string> *seq_names = nullptr);
+
+    std::vector<uint8_t> get_msa_matrix(int num_sequences, int &n_rows, int &n_cols);
+
+    /** @brief Set _seq_ID so that the next align() call assigns the desired id.
+     *  align() does _seq_ID += 1 before using it, so we set _seq_ID = id - 1. */
+    void set_next_seq_id(int id) { _seq_ID = id - 1; }
 
     /**
      * @brief Return the consensus sequence from the current MSA.
@@ -407,6 +423,12 @@ private:
     NodeId _start_node;
     NodeId _end_node;
     int _start_offset;
+
+    // Graph endpoint node IDs. For a standard 3-node graph these are 0 and 2.
+    // For multi-segment graphs (source -> seg0 -> ... -> segN -> sink) the
+    // sink ID is N+1.
+    NodeId _source_node = 0;
+    NodeId _sink_node = 2;
     Cell _start_pos;
 
     std::unique_ptr<ScratchPad> _scratchpad;
@@ -423,6 +445,22 @@ private:
     SequenceView _seq;
 
     Alignment _alignment;
+
+    // When custom_end_node is set, only nodes reachable from _start_node
+    // that can reach _end_node are in the subgraph. Empty = use all nodes.
+    std::vector<bool> _subgraph_nodes;
+    bool _use_subgraph = false;
+
+    // Compute the set of nodes reachable from start that can reach end.
+    void compute_subgraph(NodeId start, NodeId end);
+
+    // Check if a node is in the active subgraph.
+    // New nodes added by add_alignment_poa will have IDs >= vector size,
+    // returning false (correct: they weren't in the original subgraph).
+    bool in_subgraph(NodeId id) const {
+        return !_use_subgraph
+            || (static_cast<size_t>(id) < _subgraph_nodes.size() && _subgraph_nodes[id]);
+    }
 };
 
 }   // namespace theseus

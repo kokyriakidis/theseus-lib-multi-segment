@@ -303,6 +303,10 @@ public:
         return nodes_.size() - free_node_ids_.size();
     }
 
+    size_t node_id_bound() const {
+        return nodes_.size();
+    }
+
     NodeIdRange nodes() const {
         return NodeIdRange(AliveNodeIterator(this, 0),
                            AliveNodeIterator(this, nodes_.size()));
@@ -471,6 +475,7 @@ Graph::NodeView Graph::node(NodeId id) const { return impl_->node(id); }
 Graph::NodeView Graph::node_rev(NodeId id) const { return impl_->node_rev(id); }
 
 size_t Graph::nnodes() const { return impl_->nnodes(); }
+size_t Graph::node_id_bound() const { return impl_->node_id_bound(); }
 
 bool Graph::is_source(NodeId id) const { return impl_->is_source(id); }
 

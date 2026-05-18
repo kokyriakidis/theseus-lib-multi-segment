@@ -189,6 +189,54 @@ TEST_CASE("Check MSA aligner") {
         CHECK(alignment.compute_affine_gap_score(penalties) == 9); // Check score
     }
 
+    SUBCASE("Multi-segment constructor and align_from") {
+        // Build a 3-segment backbone graph: seg0="AAAA", seg1="CCCC", seg2="GGGG"
+        std::vector<std::string_view> segments = {"AAAA", "CCCC", "GGGG"};
+        std::vector<NodeId> node_ids;
+
+        theseus::Penalties penalties(0, 2, 3, 1);
+        theseus::Heuristics heuristics(false, false);
+        theseus::TheseusMSA aligner(penalties, heuristics, segments, node_ids, 1);
+
+        // node_ids should have 3 entries (one per segment)
+        CHECK(node_ids.size() == 3);
+
+        // Full alignment from source: sequence covers all 3 segments exactly
+        theseus::Alignment alignment = aligner.align("AAAACCCCGGGG", 1, false, false);
+        CHECK(alignment.compute_affine_gap_score(penalties) == 0);
+
+        // align_from at seg1: sequence covers seg1+seg2 exactly
+        alignment = aligner.align_from("CCCCGGGG", node_ids[1], 1, true);
+        CHECK(alignment.compute_affine_gap_score(penalties) == 0);
+
+        // align_from at seg0 with a mismatch in seg1
+        alignment = aligner.align_from("AAAATTTTGGGG", node_ids[0], 1, false);
+        CHECK(alignment.compute_affine_gap_score(penalties) == 8); // 4 mismatches * 2
+    }
+
+    SUBCASE("align_from partial coverage (sequence shorter than remaining graph)") {
+        // Build a 4-segment backbone: seg0="AAAA", seg1="CCCC", seg2="GGGG", seg3="TTTT"
+        std::vector<std::string_view> segments = {"AAAA", "CCCC", "GGGG", "TTTT"};
+        std::vector<NodeId> node_ids;
+
+        theseus::Penalties penalties(0, 2, 3, 1);
+        theseus::Heuristics heuristics(false, false);
+        theseus::TheseusMSA aligner(penalties, heuristics, segments, node_ids, 1);
+
+        CHECK(node_ids.size() == 4);
+
+        // Align from seg1 with a sequence that covers only seg1+seg2 (not seg3).
+        // The aligner should handle partial coverage via init_partial_backtrace.
+        theseus::Alignment alignment = aligner.align_from("CCCCGGGG", node_ids[1], 1, true);
+
+        // Count matches in the CIGAR.
+        int match_count = 0;
+        for (char op : alignment.edit_op) {
+            if (op == 'M') match_count++;
+        }
+        CHECK(match_count == 8);
+    }
+
     SUBCASE("Correct reversed MSA") {
         // Equal sequences
         std::string initial_seq = "ACCCGTAAAAGGG";

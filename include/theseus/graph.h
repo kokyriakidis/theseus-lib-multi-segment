@@ -598,6 +598,12 @@ public:
     [[nodiscard]] size_t nnodes() const;
 
     /**
+     * @brief Upper bound on NodeId values (for flat array indexing).
+     * Returns one past the highest possible NodeId.
+     */
+    [[nodiscard]] size_t node_id_bound() const;
+
+    /**
      * Check if the node with the given id is a source node (i.e., has no incoming edges).
      *
      * @param id The id of the node to check.

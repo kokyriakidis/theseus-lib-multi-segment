@@ -27,18 +27,32 @@
 
 
 #include <string_view>
+#include <chrono>
+#include <atomic>
 #include "theseus_aligner_impl.h"
+
+// Cumulative timing counters for align_from profiling.
+std::atomic<int64_t> g_subgraph_ns{0};
+std::atomic<int64_t> g_new_alignment_ns{0};
+std::atomic<int64_t> g_dp_loop_ns{0};
+std::atomic<int64_t> g_backtrace_ns{0};
+std::atomic<int64_t> g_poa_update_ns{0};
+std::atomic<int64_t> g_align_calls{0};
+std::atomic<int64_t> g_total_score{0};
 
 namespace theseus {
 
 TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
                                        const Heuristics &heuristics,
                                        Graph &&graph,
-                                       int initial_weight) :  _penalties(penalties),
+                                       int initial_weight,
+                                       NodeId sink_node) :    _penalties(penalties),
                                                               _internal_penalties(penalties),
                                                               _heuristics(heuristics),
                                                               _graph(std::move(graph)),
                                                               _seq("", false) {
+    _source_node = 0;
+    _sink_node = sink_node;
     // TODO: Gap-linear and dual affine-gap.
     const auto n_scores = std::max({_internal_penalties.gapo() +_internal_penalties.gape(),
                                   _internal_penalties.gapo() +_internal_penalties.gape(),
@@ -46,13 +60,71 @@ TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
 
     // Always MSA for pericles
     _poa_graph = std::make_unique<POAGraph>();
-    _poa_graph->create_initial_graph(_graph, initial_weight);
+    if (_sink_node == 2) {
+        _poa_graph->create_initial_graph(_graph, initial_weight);
+    }
+    else {
+        _poa_graph->create_initial_graph_multi_segment(_graph, initial_weight);
+    }
     _internal_penalties = InternalPenalties(penalties);
     _scope = std::make_unique<Scope>(n_scores);
     _beyond_scope = std::make_unique<BeyondScope>();
     constexpr int expected_nvertices = std::max(1024, 0); // TODO: Set the expected number of vertices
     _vertices_data = std::make_unique<VerticesData>(penalties, n_scores, expected_nvertices);
     _scratchpad = std::make_unique<ScratchPad>(-1024, 1024);
+}
+
+// Compute the set of nodes in the subgraph between start and end.
+// A node is in the subgraph if it is reachable from start via forward
+// edges AND can reach end via forward edges.
+void TheseusAlignerImpl::compute_subgraph(NodeId start, NodeId end) {
+    const size_t n = _graph.node_id_bound();
+
+    // Forward BFS from start using flat bitvector.
+    std::vector<bool> forward(n, false);
+    {
+        std::queue<NodeId> q;
+        q.push(start);
+        forward[start] = true;
+        while (!q.empty()) {
+            NodeId cur = q.front(); q.pop();
+            if (cur == end) continue;
+            NodeView nv = _graph.node(cur);
+            for (auto out_id : nv.out_nodes) {
+                if (static_cast<size_t>(out_id) < n && !forward[out_id]) {
+                    forward[out_id] = true;
+                    q.push(out_id);
+                }
+            }
+        }
+    }
+
+    // Backward BFS from end using flat bitvector.
+    std::vector<bool> backward(n, false);
+    {
+        std::queue<NodeId> q;
+        q.push(end);
+        backward[end] = true;
+        while (!q.empty()) {
+            NodeId cur = q.front(); q.pop();
+            if (cur == start) continue;
+            NodeView nv = _graph.node(cur);
+            for (auto in_id : nv.in_nodes) {
+                if (static_cast<size_t>(in_id) < n && !backward[in_id]) {
+                    backward[in_id] = true;
+                    q.push(in_id);
+                }
+            }
+        }
+    }
+
+    // Intersection: nodes reachable from start that can reach end.
+    _subgraph_nodes.assign(n, false);
+    for (size_t i = 0; i < n; i++) {
+        if (forward[i] && backward[i]) {
+            _subgraph_nodes[i] = true;
+        }
+    }
 }
 
 // Get the node/reversed node depending on the alignment configuration
@@ -73,12 +145,21 @@ void TheseusAlignerImpl::new_alignment(SequenceView seq,
     _vertices_data->new_alignment();
     _seq = seq;
     _reversed_alignment = reverse_alignment;
-    // Initialize scratchpad
+    // Initialize scratchpad — only consider subgraph nodes if scoped.
     int max_diag = 0, v_n;
-    NodeIdRange nodes = _graph.nodes();
-    for (const auto &node : nodes) {
-        v_n = _graph.node_size(node);
-        max_diag = std::max(max_diag, v_n);
+    if (_use_subgraph) {
+        for (size_t nid = 0; nid < _subgraph_nodes.size(); ++nid) {
+            if (_subgraph_nodes[nid]) {
+                v_n = _graph.node_size(static_cast<NodeId>(nid));
+                max_diag = std::max(max_diag, v_n);
+            }
+        }
+    } else {
+        NodeIdRange nodes = _graph.nodes();
+        for (const auto &node : nodes) {
+            v_n = _graph.node_size(node);
+            max_diag = std::max(max_diag, v_n);
+        }
     }
     const int min_diag = -_seq.size();
     if (_scratchpad->max_diag() < max_diag ||
@@ -147,24 +228,49 @@ Alignment TheseusAlignerImpl::align(
     std::string_view seq,
     int  weight,
     bool reverse_alignment,
-    bool is_ends_free
+    bool is_ends_free,
+    int custom_start_node,
+    int custom_start_offset,
+    int custom_end_node
   )
 {
-  if (!reverse_alignment) {
-    _start_node = 0;
+  bool _custom_start = (custom_start_node >= 0);
+  if (_custom_start) {
+    _start_node = static_cast<NodeId>(custom_start_node);
+    _start_offset = custom_start_offset;
+    _end_node = (custom_end_node >= 0) ? static_cast<NodeId>(custom_end_node) : _sink_node;
+  }
+  else if (!reverse_alignment) {
+    _start_node = _source_node;
     _start_offset = 0;
-    _end_node = 2;
+    _end_node = _sink_node;
   }
   else {
-    _start_node = 2;
+    _start_node = _sink_node;
     _start_offset = 0;
-    _end_node = 0;
+    _end_node = _source_node;
   }
   _ends_free = is_ends_free;
+
+  auto t0 = std::chrono::steady_clock::now();
+
+  // Compute subgraph scope when a custom end node is set.
+  if (_custom_start && custom_end_node >= 0) {
+    _use_subgraph = true;
+    compute_subgraph(_start_node, _end_node);
+  } else {
+    _use_subgraph = false;
+    _subgraph_nodes.clear();
+  }
+
+  auto t1 = std::chrono::steady_clock::now();
+
   // Initialize data for the new alignment
   new_alignment(Graph::SequenceView(seq, reverse_alignment), reverse_alignment);
+
+  auto t2 = std::chrono::steady_clock::now();
+
   _score = 0;
-  // _graph.print_code_graphviz();
   // Main alignment loop
   while (_alignment.theseus_status == THESEUS_STATUS_OK) {
     // Initial extend
@@ -185,6 +291,9 @@ Alignment TheseusAlignerImpl::align(
     _vertices_data->new_score(_score);
   }
   _score -= 1;
+
+  auto t3 = std::chrono::steady_clock::now();
+
   // Backtrace
   _seq_ID += 1;
   if (_alignment.theseus_status == THESEUS_STATUS_ALG_COMPLETED) {
@@ -195,7 +304,21 @@ Alignment TheseusAlignerImpl::align(
     int start_row = _reversed_alignment ?
                     _seq.size() - _start_pos.offset :
                     0;
-    _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, !_ends_free, _reversed_alignment);
+    if (_custom_start) {
+      // Custom start: determine end-to-end by checking whether the path
+      // actually reached the sink, since the alignment started at an
+      // interior node (not the source).
+      bool reached_end = false;
+      if (!_alignment.path.empty()) {
+          NodeId last_node = _reversed_alignment ? _alignment.path.front() : _alignment.path.back();
+          reached_end = (last_node == _end_node);
+      }
+      _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, reached_end, _reversed_alignment, true, _start_offset);
+    }
+    else {
+      // Original pericles path — unchanged
+      _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, !_ends_free, _reversed_alignment);
+    }
   }
   else {
     // Error messages
@@ -215,9 +338,24 @@ Alignment TheseusAlignerImpl::align(
       int start_row = _reversed_alignment ?
                     _seq.size() - _start_pos.offset :
                     0;
-      _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, !_ends_free, _reversed_alignment);
+      if (_custom_start) {
+        _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, false, _reversed_alignment, true, _start_offset);
+      }
+      else {
+        // Original pericles path — unchanged
+        _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, !_ends_free, _reversed_alignment);
+      }
     }
   }
+  auto t4 = std::chrono::steady_clock::now();
+
+  g_subgraph_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+  g_new_alignment_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count();
+  g_dp_loop_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(t3 - t2).count();
+  g_poa_update_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(t4 - t3).count();
+  g_total_score += _score;
+  g_align_calls++;
+
   return _alignment;
 }
 
@@ -456,8 +594,10 @@ void TheseusAlignerImpl::store_M_jump(NodeView curr_node,
   Cell new_cell = prev_cell;
   new_cell.from_matrix = from_matrix;
   new_cell.prev_pos = prev_pos;
-  // For each neighbour, store the jump and metadata
+  // For each neighbour, store the jump and metadata.
+  // Skip neighbours outside the subgraph when scoped.
   for (auto out_node_id : curr_node.out_nodes) {
+    if (!in_subgraph(out_node_id)) continue;
     new_cell.vertex_id = out_node_id;
     new_cell.diag = new_diag;
     NodeView out_node = get_node(out_node_id);
@@ -489,8 +629,10 @@ void TheseusAlignerImpl::store_I_jump(
   Cell new_cell = prev_cell;
   new_cell.from_matrix = from_matrix;
   new_cell.prev_pos = prev_pos;
-  // For each neighbour, store the jump and metadata
+  // For each neighbour, store the jump and metadata.
+  // Skip neighbours outside the subgraph when scoped.
   for (auto out_node_id : curr_node.out_nodes) {
+    if (!in_subgraph(out_node_id)) continue;
     new_cell.vertex_id = out_node_id;
     new_cell.diag = new_diag;
     _vertices_data->activate_vertex(new_cell.vertex_id);
@@ -792,9 +934,16 @@ void TheseusAlignerImpl::print_as_gfa(std::ostream &gfa_output)
   print_as_gfa_internal(gfa_output);
 }
 
+std::vector<uint8_t> TheseusAlignerImpl::get_msa_matrix(int num_sequences,
+                                                        int &n_rows, int &n_cols) {
+  return _poa_graph->poa_to_msa_matrix(
+      num_sequences >= 0 ? num_sequences : _seq_ID, n_rows, n_cols);
+}
+
 // Print as msa (can only call from TheseusMSA)
-void TheseusAlignerImpl::print_as_msa(std::ostream &out_stream) {
-  _poa_graph->poa_to_fasta(_seq_ID, out_stream);
+void TheseusAlignerImpl::print_as_msa(std::ostream &out_stream, int num_sequences,
+                                      const std::vector<std::string> *seq_names) {
+  _poa_graph->poa_to_fasta(num_sequences >= 0 ? num_sequences : _seq_ID, out_stream, seq_names);
 }
 
 

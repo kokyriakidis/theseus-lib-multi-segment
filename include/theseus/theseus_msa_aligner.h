@@ -30,7 +30,9 @@
 
 #include <memory>
 #include <istream>
+#include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "theseus/penalties.h"
 #include "theseus/alignment.h"
@@ -45,6 +47,20 @@
 
 namespace theseus
 {
+
+    /** Row-major MSA matrix with sequence IDs.
+     *  Access element at (row, col) via data[row * n_cols + col].
+     *  Values: 'A','C','G','T' for bases, '-' for gaps.
+     *  seq_ids[i] is the caller-provided numeric ID for row i. */
+    struct MSAMatrix {
+        std::vector<uint8_t> data;       // flat row-major storage
+        std::vector<uint64_t> seq_ids;   // one numeric ID per row
+        int n_rows = 0;                  // number of sequences (including backbone)
+        int n_cols = 0;                  // number of MSA columns
+
+        uint8_t  operator()(int row, int col) const { return data[row * n_cols + col]; }
+        uint8_t& operator()(int row, int col)       { return data[row * n_cols + col]; }
+    };
 
     class TheseusAlignerImpl; // Forward declaration of the implementation class.
 
@@ -68,6 +84,27 @@ namespace theseus
             bool is_ends_free);
 
         /**
+         * Multi-segment constructor. Creates a graph with one node per segment,
+         * chained as: source -> seg0 -> seg1 -> ... -> segN -> sink.
+         *
+         * This is used when the backbone is split at anchor boundaries so that
+         * each anchor position corresponds to a node boundary in the graph.
+         *
+         * @param penalties      User defined alignment penalties
+         * @param heuristics     User defined heuristics
+         * @param segments       Vector of sequences, one per backbone segment
+         * @param node_ids       Output: filled with the compact graph NodeId for
+         *                       each segment (node_ids[i] is the NodeId of segments[i])
+         * @param initial_weight Initial weight for the backbone sequence
+         */
+        TheseusMSA(
+            const Penalties &penalties,
+            const Heuristics &heuristics,
+            const std::vector<std::string_view> &segments,
+            std::vector<Graph::NodeId> &node_ids,
+            int initial_weight = 1);
+
+        /**
          * Class destructor
          *
          */
@@ -84,6 +121,31 @@ namespace theseus
                         bool is_ends_free = false);
 
         /**
+         * Add a new sequence to the POA graph starting at a specific node.
+         * The alignment is scoped to the subgraph between start_node and
+         * end_node. Only nodes reachable from start_node that can reach
+         * end_node are considered during alignment.
+         *
+         * @param seq           Sequence to add to the MSA
+         * @param start_node    Node ID to start alignment from
+         * @param weight        Weight of the sequence (default 1)
+         * @param is_ends_free  Whether to allow a free end (default true)
+         * @param start_offset  Offset within the starting node (default 0)
+         * @param end_node      Node ID to end alignment at (-1 = sink, default)
+         * @param seq_id        Sequence ID for MSA row assignment (-1 = auto-increment, default).
+         *                      When >= 0, the internally auto-assigned ID is remapped to this
+         *                      value in all POA vertices, allowing multiple segments to share
+         *                      one MSA row.
+         */
+        Alignment align_from(std::string_view seq,
+                             Graph::NodeId start_node,
+                             int weight = 1,
+                             bool is_ends_free = true,
+                             int start_offset = 0,
+                             int end_node = -1,
+                             int seq_id = -1);
+
+        /**
          * @brief Print the current POA graph as a GFA file.
          *
          */
@@ -93,9 +155,26 @@ namespace theseus
         /**
          * @brief Print the current POA graph in MSA format.
          *
+         * @param out_stream    Output stream
+         * @param num_sequences Override the number of sequences (rows) in the MSA.
+         *                      -1 (default) uses the internal auto-incremented count.
+         *                      Use this when seq_id remapping has reduced the
+         *                      number of distinct sequences.
          */
-        void print_as_msa(std::ostream &out_stream);
+        void print_as_msa(std::ostream &out_stream, int num_sequences = -1,
+                          const std::vector<std::string> *seq_names = nullptr);
 
+
+        /**
+         * @brief Compute and return the MSA matrix.
+         *
+         * @param num_sequences  Number of sequences (rows). -1 = auto.
+         * @param seq_names      Sequence names for each row. If provided,
+         *                       stored in the returned MSAMatrix.
+         * @return MSAMatrix     Flat row-major matrix with base/gap values and names.
+         */
+        MSAMatrix get_msa_matrix(int num_sequences = -1,
+                                 const std::vector<uint64_t> *seq_ids = nullptr);
 
         /**
          * @brief Return consensus sequence.
@@ -117,6 +196,21 @@ namespace theseus
          *
          */
         void print_as_dot(std::ostream &out_stream);
+
+        /**
+         * @brief Cumulative timing breakdown from all align/align_from calls.
+         * Values are in nanoseconds.
+         */
+        struct TimingCounters {
+            int64_t subgraph_ns = 0;
+            int64_t new_alignment_ns = 0;
+            int64_t dp_loop_ns = 0;
+            int64_t poa_update_ns = 0;
+            int64_t align_calls = 0;
+            int64_t total_score = 0;
+        };
+        static TimingCounters get_timing_counters();
+        static void reset_timing_counters();
 
 
     private:

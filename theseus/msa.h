@@ -33,6 +33,7 @@
 #include <vector>
 #include <string>
 #include <stack>
+#include <queue>
 #include <functional>
 
 #include "theseus/graph.h"
@@ -262,10 +263,29 @@ namespace theseus {
             Graph &compacted_G,
             int  pivot_column,
             bool is_end_to_end,
-            bool is_reversed
+            bool is_reversed,
+            bool custom_start = false,
+            int  start_offset = 0
         ) {
-            // First vertex (add it because it is empty)
-            if (!is_reversed || is_end_to_end) {
+            // First vertex
+            if (custom_start) {
+                // Custom start: the first path node is an interior node with
+                // actual bases, not an empty sentinel. We need a "previous"
+                // POA vertex as the initial prev_v_poa for add_alignment_poa.
+                // Use the POA vertex immediately before the first base of this
+                // node (the last vertex of the preceding chain segment).
+                // start_offset is the column within the first node where the
+                // alignment begins; pivot_column is the column within the last
+                // node where it ends.
+                int first_poa_vtx = _first_poa_vtx[backtrace.path[0]];
+                poa_path.push_back(first_poa_vtx + start_offset - 1);
+                // Then expand all bases of this node from start_offset onward
+                int node_size = compacted_G.node_size(backtrace.path[0]);
+                for (int k = start_offset; k < node_size; ++k) {
+                    poa_path.push_back(first_poa_vtx + k);
+                }
+            }
+            else if (!is_reversed || is_end_to_end) {
                 poa_path.push_back(_first_poa_vtx[backtrace.path[0]]);
             }
             else {
@@ -298,10 +318,6 @@ namespace theseus {
                 // Add fake end node
                 poa_path.push_back(-1);
             }
-            // for (int l = 0; l < poa_path.size(); ++l) {
-            //     std::cout << poa_path[l] << " ";
-            // }
-            // std::cout << std::endl;
         }
 
 
@@ -315,11 +331,13 @@ namespace theseus {
             int start_row,
             int weight,
             bool is_end_to_end,
-            bool is_reversed
+            bool is_reversed,
+            bool custom_start = false,
+            int custom_start_offset = 0
         ) {
             // Convert the path to the corresponding path in the poa graph
             std::vector<int> poa_path;
-            convert_path(backtrace, poa_path, compacted_G, start_column, is_end_to_end, is_reversed);
+            convert_path(backtrace, poa_path, compacted_G, start_column, is_end_to_end, is_reversed, custom_start, custom_start_offset);
             // Reversed sequences are added "forward". Change access to them
             if (is_reversed) {
                 new_seq.change_reversed_flag(false);
@@ -459,6 +477,197 @@ namespace theseus {
             }
         }
 
+        /**
+         * Multi-segment version of create_initial_graph.
+         * Handles graphs with more than one interior node
+         * (source -> seg0 -> seg1 -> ... -> segN -> sink).
+         */
+        void create_initial_graph_multi_segment(theseus::Graph &G, int initial_weight)
+        {
+            const size_t n_nodes = G.nnodes();
+            const NodeId sink_id = n_nodes - 1;
+
+            // Source vertex
+            theseus::POAVertex source_v;
+            _first_poa_vtx.push_back(0);
+            source_v.out_edges.push_back(0);
+            source_v.associated_node_compact = 0;
+            source_v.weight = initial_weight;
+            source_v.value = '-';
+            _poa_vertices.push_back(source_v);
+            theseus::POAEdge source_edge;
+            source_edge.source = 0;
+            source_edge.destination = 1;
+            _poa_edges.push_back(source_edge);
+
+            // Interior nodes (one or more segments)
+            int total_interior_bases = 0;
+            for (NodeId nid = 1; nid < sink_id; ++nid) {
+                NodeView node_view = G.node(nid);
+                _first_poa_vtx.push_back(_poa_vertices.size());
+                for (int l = 0; l < G.node_size(nid); ++l) {
+                    theseus::POAVertex new_v;
+                    new_v.in_edges.push_back(_poa_edges.size() - 1);
+                    new_v.out_edges.push_back(_poa_edges.size());
+                    new_v.value = node_view.sequence[l];
+                    new_v.associated_node_compact = nid;
+                    new_v.weight = initial_weight;
+                    new_v.sequence_IDs.push_back(0); // Sequence ID 0
+                    _poa_vertices.push_back(new_v);
+                    theseus::POAEdge new_edge;
+                    new_edge.source = _poa_vertices.size() - 1;
+                    new_edge.destination = _poa_vertices.size();
+                    _poa_edges.push_back(new_edge);
+                    ++total_interior_bases;
+                }
+            }
+
+            // Sink vertex
+            theseus::POAVertex sink_v;
+            _first_poa_vtx.push_back(_poa_vertices.size());
+            sink_v.in_edges.push_back(_poa_edges.size() - 1);
+            sink_v.associated_node_compact = sink_id;
+            sink_v.weight = initial_weight;
+            sink_v.value = '-';
+            _poa_vertices.push_back(sink_v);
+            _end_vtx_poa = _poa_vertices.size() - 1;
+
+            if (total_interior_bases > 0) {
+                _seq_weights.push_back(initial_weight);
+                _seq_starts.push_back(1);
+                _seq_ends.push_back(total_interior_bases);
+            }
+            else {
+                _seq_weights.push_back(initial_weight);
+                _seq_starts.push_back(-1);
+                _seq_ends.push_back(-1);
+            }
+        }
+
+
+        /**
+         * @brief Compute the MSA matrix from the POA graph.
+         *
+         * Uses iterative topological sort (Kahn's algorithm) on the augmented
+         * graph, then fills a flat row-major uint8_t matrix.
+         *
+         * @param num_sequences  Number of sequences (rows = num_sequences + 1)
+         * @param n_rows_out     Output: number of rows
+         * @param n_cols_out     Output: number of columns
+         * @return               Flat row-major matrix (row * n_cols + col)
+         */
+        /**
+         * Compute MSA column ranks using iterative topological sort on the
+         * original POA graph (no augmented copy). Follows abPOA's approach:
+         * when a node is processed, all its aligned nodes receive the same
+         * rank and are also enqueued. In-degree is tracked for both real
+         * edges and aligned-node dependencies.
+         */
+        std::vector<uint8_t> poa_to_msa_matrix(int num_sequences,
+                                                int &n_rows_out,
+                                                int &n_cols_out) {
+            const int n_vtx = static_cast<int>(_poa_vertices.size());
+            const int source = 0;
+            const int sink = static_cast<int>(_end_vtx_poa);
+
+            // Compute in-degree from original edges only.
+            std::vector<int> in_degree(n_vtx, 0);
+            for (const auto &edge : _poa_edges) {
+                in_degree[edge.destination]++;
+            }
+
+            // Column assignment: -1 = not yet assigned (source/sink stay -1).
+            std::vector<int> node_to_column(n_vtx, -1);
+            int n_cols = 0;
+
+            // Track which nodes have been enqueued to prevent double-processing
+            // when an aligned node is pulled in early and later reaches
+            // in_degree 0 through its own predecessors.
+            std::vector<bool> enqueued(n_vtx, false);
+
+            // Kahn's algorithm on the original graph.
+            // Source/sink are excluded from column assignment so the output
+            // matrix contains only interior (base-carrying) columns.
+            // When a node v is popped:
+            //   1. Skip column assignment for source/sink.
+            //   2. Assign column (shared with aligned nodes that already have one).
+            //   3. Give all aligned nodes the same column and enqueue them.
+            //   4. Decrement in-degree of successors; enqueue when zero and
+            //      all aligned nodes are also ready (abPOA approach).
+            std::queue<int> q;
+            for (int v = 0; v < n_vtx; v++) {
+                if (in_degree[v] == 0) {
+                    q.push(v);
+                    enqueued[v] = true;
+                }
+            }
+
+            // Helper: decrement in-degree of successors and enqueue when ready.
+            auto propagate = [&](int v) {
+                for (int edge_idx : _poa_vertices[v].out_edges) {
+                    int next = _poa_edges[edge_idx].destination;
+                    if (--in_degree[next] == 0 && !enqueued[next]) {
+                        bool all_ready = true;
+                        for (int a : _poa_vertices[next].associated_vtxs) {
+                            if (in_degree[a] > 0) { all_ready = false; break; }
+                        }
+                        if (all_ready) {
+                            q.push(next);
+                            enqueued[next] = true;
+                            for (int a : _poa_vertices[next].associated_vtxs) {
+                                if (!enqueued[a]) {
+                                    q.push(a);
+                                    enqueued[a] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            while (!q.empty()) {
+                int v = q.front(); q.pop();
+
+                // Already assigned (pulled in as an aligned node) or
+                // source/sink — just propagate, no column assignment.
+                if (node_to_column[v] >= 0 || v == source || v == sink) {
+                    propagate(v);
+                    continue;
+                }
+
+                // Assign column: reuse an aligned node's column if one exists.
+                int col = -1;
+                for (int a : _poa_vertices[v].associated_vtxs) {
+                    if (node_to_column[a] >= 0) { col = node_to_column[a]; break; }
+                }
+                if (col < 0) col = n_cols++;
+                node_to_column[v] = col;
+                for (int a : _poa_vertices[v].associated_vtxs) {
+                    node_to_column[a] = col;
+                }
+
+                propagate(v);
+            }
+
+            // Build flat matrix — source/sink have no columns, no remapping needed.
+            int n_rows = num_sequences + 1;
+            std::vector<uint8_t> matrix(static_cast<size_t>(n_rows) * n_cols, '-');
+
+            for (int l = 1; l < n_vtx; l++) {
+                int col = node_to_column[l];
+                if (col < 0) continue; // sink
+                uint8_t val = static_cast<uint8_t>(_poa_vertices[l].value);
+                for (int seq_id : _poa_vertices[l].sequence_IDs) {
+                    if (seq_id < n_rows) {
+                        matrix[seq_id * n_cols + col] = val;
+                    }
+                }
+            }
+
+            n_rows_out = n_rows;
+            n_cols_out = n_cols;
+            return matrix;
+        }
 
         /**
          * @brief Compute the consensus sequence and the MSA matrix of the POA
@@ -486,7 +695,6 @@ namespace theseus {
                                     std::vector<std::vector<char>> &msa,
                                     size_t &source_id,
                                     size_t &sink_id) {
-
             // Create an augmented graph to ensure MSA integrity (to ensure valid topological order)
             POAGraph augmented_poa_graph;
             augmented_poa_graph._poa_vertices = _poa_vertices;
@@ -694,7 +902,8 @@ namespace theseus {
          *
          * @param output_file
          */
-        void poa_to_fasta(int num_sequences, std::ostream &out_file) {
+        void poa_to_fasta(int num_sequences, std::ostream &out_file,
+                          const std::vector<std::string> *seq_names = nullptr) {
             // Get column ordering and nodes in each column
             std::vector<int> consensus_weights;
             std::vector<std::vector<char>> msa;
@@ -705,10 +914,10 @@ namespace theseus {
 
             // Print the MSA
             for (size_t i = 0; i < msa.size(); ++i) {
-                if (i < msa.size() - 1) {
-                    out_file << ">Sequence_" << i + 1 << "\n"; // Sequence ID
+                if (seq_names && i < seq_names->size()) {
+                    out_file << ">" << (*seq_names)[i] << "\n";
                 } else {
-                    out_file << ">Consensus\n";
+                    out_file << ">Sequence_" << i + 1 << "\n";
                 }
                 for (size_t j = 0; j < msa[i].size(); ++j) {
                     if (j != source_id && j != sink_id) {
