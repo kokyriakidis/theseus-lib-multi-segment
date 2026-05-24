@@ -231,8 +231,11 @@ namespace theseus {
             int destination,
             Graph &compacted_G)
         {
-            // Stop if one of the nodes is not valid
-            if (source == -1 || destination == -1) return;
+            // Stop if one of the nodes is not valid or if it's a self-loop.
+            // Self-loops arise in custom_start (align_from) alignments when
+            // the last path node's first POA vertex coincides with the last
+            // vertex consumed by the alignment.
+            if (source == -1 || destination == -1 || source == destination) return;
 
             // Check if the edge already exists
             bool already_exists = false;
@@ -347,14 +350,12 @@ namespace theseus {
             long unsigned int k = 0;
             int i = start_row, l = 0, prev_v_poa = poa_path[0], new_v_poa = poa_path[0];
             while (k < backtrace.edit_op.size()) {
-                // std::cout << "k: " << k << std::endl;
                 if (backtrace.edit_op[k] == 'M') {  // Match
                     prev_v_poa = new_v_poa;
                     new_v_poa = poa_path[l + 1];
                     _poa_vertices[new_v_poa].sequence_IDs.push_back(seq_ID);
                     _poa_vertices[new_v_poa].weight += weight;
                     update_poa_edge(prev_v_poa, new_v_poa, compacted_G);
-                    // std::cout << prev_v_poa << " to " << new_v_poa << std::endl;
                     i += 1;
                     l += 1;
                     new_node_exists = false;
@@ -402,7 +403,7 @@ namespace theseus {
             prev_v_poa = new_v_poa;
             // Add edge to the sink/source node, as no edit operation covers it?
             if (is_end_to_end || !is_reversed) {
-                update_poa_edge(prev_v_poa, poa_path[poa_path.size() - 1], compacted_G); // Add the edge to the sink node
+                update_poa_edge(prev_v_poa, poa_path[poa_path.size() - 1], compacted_G);
             }
             // Update sequence weight, start poa vertex and end poa vertex
             _seq_weights.push_back(weight);
@@ -582,7 +583,7 @@ namespace theseus {
 
             // Track which nodes have been enqueued to prevent double-processing
             // when an aligned node is pulled in early and later reaches
-            // in_degree 0 through its own predecessors.
+            // in-degree zero through its own predecessors.
             std::vector<bool> enqueued(n_vtx, false);
 
             // Kahn's algorithm on the original graph.
@@ -593,7 +594,7 @@ namespace theseus {
             //   2. Assign column (shared with aligned nodes that already have one).
             //   3. Give all aligned nodes the same column and enqueue them.
             //   4. Decrement in-degree of successors; enqueue when zero and
-            //      all aligned nodes are also ready (abPOA approach).
+            //      all aligned nodes are also ready.
             std::queue<int> q;
             for (int v = 0; v < n_vtx; v++) {
                 if (in_degree[v] == 0) {
@@ -607,6 +608,8 @@ namespace theseus {
                 for (int edge_idx : _poa_vertices[v].out_edges) {
                     int next = _poa_edges[edge_idx].destination;
                     if (--in_degree[next] == 0 && !enqueued[next]) {
+                        // Check that all aligned nodes also have in-degree 0
+                        // so they can share a column.
                         bool all_ready = true;
                         for (int a : _poa_vertices[next].associated_vtxs) {
                             if (in_degree[a] > 0) { all_ready = false; break; }
@@ -625,28 +628,57 @@ namespace theseus {
                 }
             };
 
-            while (!q.empty()) {
-                int v = q.front(); q.pop();
+            // Process queue with cycle breaking.
+            // align_from may create small back-edges in the POA graph,
+            // producing cycles that prevent Kahn's algorithm from visiting
+            // all nodes. When the queue empties with unvisited nodes
+            // remaining, force-enqueue one stuck node to break the cycle.
+            int cycle_scan = 0;
+            for (;;) {
+                while (!q.empty()) {
+                    int v = q.front(); q.pop();
 
-                // Already assigned (pulled in as an aligned node) or
-                // source/sink — just propagate, no column assignment.
-                if (node_to_column[v] >= 0 || v == source || v == sink) {
+                    if (node_to_column[v] >= 0 || v == source || v == sink) {
+                        propagate(v);
+                        continue;
+                    }
+
+                    int col = -1;
+                    for (int a : _poa_vertices[v].associated_vtxs) {
+                        if (node_to_column[a] >= 0) { col = node_to_column[a]; break; }
+                    }
+                    if (col < 0) col = n_cols++;
+                    node_to_column[v] = col;
+                    for (int a : _poa_vertices[v].associated_vtxs) {
+                        node_to_column[a] = col;
+                    }
+
                     propagate(v);
-                    continue;
                 }
 
-                // Assign column: reuse an aligned node's column if one exists.
-                int col = -1;
-                for (int a : _poa_vertices[v].associated_vtxs) {
-                    if (node_to_column[a] >= 0) { col = node_to_column[a]; break; }
+                // Find next unvisited non-source/sink node to break cycle.
+                // Resume scan from where we left off to avoid O(V²) total.
+                int stuck = -1;
+                while (cycle_scan < n_vtx) {
+                    if (!enqueued[cycle_scan] &&
+                        cycle_scan != source && cycle_scan != sink) {
+                        stuck = cycle_scan;
+                        break;
+                    }
+                    cycle_scan++;
                 }
-                if (col < 0) col = n_cols++;
-                node_to_column[v] = col;
-                for (int a : _poa_vertices[v].associated_vtxs) {
-                    node_to_column[a] = col;
-                }
+                if (stuck < 0) break; // all nodes visited
 
-                propagate(v);
+                // Force-enqueue the stuck node and any aligned nodes
+                // that are also stuck, so they share a column.
+                q.push(stuck);
+                enqueued[stuck] = true;
+                for (int a : _poa_vertices[stuck].associated_vtxs) {
+                    if (!enqueued[a]) {
+                        q.push(a);
+                        enqueued[a] = true;
+                    }
+                }
             }
 
             // Build flat matrix — source/sink have no columns, no remapping needed.
