@@ -84,9 +84,13 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
 
-# Install the include directory
+# Install the public headers (include/) and the internal header msa.h
+# which is used directly by downstream projects via #include <theseus/msa.h>.
 install(DIRECTORY include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}  # Default to include
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(FILES theseus/msa.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/theseus
 )
 
 #
