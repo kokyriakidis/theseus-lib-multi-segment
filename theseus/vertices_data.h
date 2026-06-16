@@ -101,7 +101,7 @@ public:
      * @param nexpected_vertices    Number of expected vertices.
      */
     VerticesData(const Penalties &penalties, int nscores, int nexpected_vertices) :
-        _penalties(penalties), _nscores(nscores) {
+        _nscores(nscores), _penalties(penalties) {
         _active_vertices.reserve(nexpected_vertices);
         _vertex_to_idx.reserve(nexpected_vertices);
     }
@@ -141,7 +141,7 @@ public:
      * @param vtx   Vertex id
      * @return Cell::vertex_t  Index of the vertex in the active vertices
      */
-    Cell::vertex_t get_id(int vtx) {
+    int get_id(int vtx) {
         return _vertex_to_idx[vtx];
     }
 
@@ -206,7 +206,7 @@ public:
 
         // Iterate through the loop
         int k = 0;
-        for (int l = 1; l < invalid_v.size(); ++l) {
+        for (long unsigned int l = 1; l < invalid_v.size(); ++l) {
             // You should compact them
             if (invalid_v[k].seg.end_d + 1 >= invalid_v[l].seg.start_d) {
                 // Update segment
@@ -254,7 +254,7 @@ public:
                                int default_rem_up,
                                int default_rem_down) {
 
-        for (int l = 0; l < invalid_v.size(); ++l) {
+        for (long unsigned int l = 0; l < invalid_v.size(); ++l) {
             invalid_v[l].rem_down -= 1;
             invalid_v[l].rem_up -= 1;
 
@@ -274,7 +274,7 @@ public:
      *
      */
     void expand() {
-        for (int l = 0; l < _active_vertices.size(); ++l) {
+        for (long unsigned int l = 0; l < _active_vertices.size(); ++l) {
             auto &vdata = _active_vertices[l];
             expand_invalid_vector(vdata._m_invalid, _penalties.gape(), _penalties.gape());
             expand_invalid_vector(vdata._i_invalid, _penalties.gape(), _penalties.gape());
@@ -290,7 +290,7 @@ public:
      *
      */
     void compact() {
-        for (int l = 0; l < _active_vertices.size(); ++l) {
+        for (long unsigned int l = 0; l < _active_vertices.size(); ++l) {
             compact_invalid_vector(_active_vertices[l]._m_invalid,
                                    _penalties.gape(),
                                    _penalties.gape());
@@ -408,7 +408,7 @@ public:
             }
         }();
 
-        for (int l = 0; l < invalid.size(); ++l) {
+        for (size_t l = 0; l < invalid.size(); ++l) {
             if (invalid[l].seg.start_d <= diag &&
                 diag <= invalid[l].seg.end_d) {
                 return false;
@@ -422,7 +422,7 @@ public:
      *
      * @return int
      */
-    int num_active_vertices() {
+    size_t num_active_vertices() {
         return _active_vertices.size();
     }
 
@@ -432,7 +432,7 @@ public:
      *
      * @param vtx
      */
-    void activate_vertex(int vtx) {
+    void activate_vertex(NodeId vtx) {
         if (_vertex_to_idx.size() <= vtx) {
             _vertex_to_idx.resize(2*vtx + 1, -1);
         }
@@ -453,7 +453,7 @@ private:
 
     std::vector<VertexData> _active_vertices;
 
-    std::vector<Cell::vertex_t> _vertex_to_idx;
+    std::vector<int> _vertex_to_idx;
 };
 
 }   // namespace theseus

@@ -54,14 +54,16 @@ namespace theseus
         /**
          * Initial constructor
          *
-         * @param penalties  User defined alignment penalties
-         * @param heuristics User defined heuristics
-         * @param seq        Sequence to initialize the graph
+         * @param penalties    User defined alignment penalties
+         * @param heuristics   User defined heuristics
+         * @param seq          Sequence to initialize the graph
+         * @param initial_weight    Initial weight for the first added sequence
          */
         TheseusMSA(
             const Penalties &penalties,
             const Heuristics &heuristics,
-            std::string_view seq);
+            std::string_view seq,
+            int initial_weight);
 
         /**
          * Class destructor
@@ -75,38 +77,48 @@ namespace theseus
          * @param seq Sequence to add to the MSA
          */
         Alignment align(std::string_view seq,
-                        bool reverse_alignment = false);
+                        int  weight = 1,
+                        bool lag_pruning_active = false);
 
         /**
          * @brief Print the current POA graph as a GFA file.
          *
          */
-        void print_as_gfa(std::ofstream &out_stream);
+        void print_as_gfa(std::ostream &out_stream);
 
 
         /**
          * @brief Print the current POA graph in MSA format.
          *
          */
-        void print_as_msa(std::ofstream &out_stream);
+        void print_as_msa(std::ostream &out_stream);
 
 
         /**
          * @brief Return consensus sequence.
          *
          */
-        std::string get_consensus_sequence();
+        std::string heaviest_bundle_consensus();
+
+        /**
+         * @brief Compute the weighted majority voting consensus sequence.
+         *
+         */
+        void majority_voting_consensus(std::vector<int> &consensus_weights,
+                                       std::string &consensus_sequence,
+                                       std::string &consensus_sequence_gapped);
 
 
         /**
          * @brief Print in graphviz format.
          *
          */
-        void print_as_dot(std::ofstream &out_stream);
+        void print_as_dot(std::ostream &out_stream);
 
 
     private:
         std::unique_ptr<TheseusAlignerImpl> msa_aligner_impl_;
+        bool still_end_to_end = true;
     };
 
 } // namespace theseus

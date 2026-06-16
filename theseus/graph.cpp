@@ -344,12 +344,12 @@ public:
         std::cout << "  every node/.style={draw, rounded corners, minimum height=8mm, font=\\ttfamily\\small}\n";
         std::cout << "]\n";
 
-        for (int i = 0; i < nodes_.size(); ++i) {
+        for (long unsigned int i = 0; i < nodes_.size(); ++i) {
             auto node = nodes_[i];
             std::cout << "  \\node (n" << i << ") at (" << (i * 3) << ",0) {" << i << ": " << node.sequence << "};\n";
         }
 
-        for (int i = 0; i < nodes_.size(); ++i) {
+        for (long unsigned int i = 0; i < nodes_.size(); ++i) {
             auto node = nodes_[i];
             for (auto out_id : node.out_nodes) {
                 std::cout << "  \\draw[->] (n" << i << ") -- (n" << out_id << ");\n";

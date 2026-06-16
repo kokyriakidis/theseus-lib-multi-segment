@@ -39,7 +39,6 @@
 #include <cassert>
 #include <unordered_map>
 
-#include <handlegraph/handle_graph.hpp>
 
 #include "theseus/alignment.h"
 #include "theseus/graph.h"
@@ -206,66 +205,6 @@ void graph_from_gfa_stream(std::istream &gfa_stream,
     // Validate that all edges connect existing nodes TODO:
 }
 
-// // Constructor from handle graph
-// Graph::Graph(const handlegraph::HandleGraph &handle_graph) {
-//     // Add nodes
-//     handle_graph.for_each_handle([&](const handlegraph::handle_t& h) {
-//         // Forward orientation
-//         vertex v;
-//         v.name = std::to_string(handle_graph.get_id(h)); // Use the handle id as the name of the vertex
-//         v.value = handle_graph.get_sequence(h);
-//         _vertices.push_back(v);
-
-//         // Reverse orientation
-//         const handlegraph::handle_t& h_rev = handle_graph.flip(h);
-//         v.name = std::to_string(handle_graph.get_id(h_rev));
-//         v.value = handle_graph.get_sequence(h_rev);
-//         _vertices.push_back(v);
-//     });
-
-//     // Create name to id mapping
-//     for (int i = 0; i < _vertices.size(); ++i) {
-//         name_to_id_[_vertices[i].name] = i;
-//     }
-
-//     // Add edges
-//     handle_graph.for_each_edge([&](const handlegraph::edge_t& e) {
-//         // Forward orientation
-//         edge edge_fwd;
-//         std::string from_handle_name = std::to_string(handle_graph.get_id(e.first));
-//         std::string to_handle_name   = std::to_string(handle_graph.get_id(e.second));
-//         int from_vertex_id = name_to_id_.at(from_handle_name);
-//         int to_vertex_id   = name_to_id_.at(to_handle_name);
-//         // Check that the vertices exist in the graph
-//         if (from_vertex_id == -1 || to_vertex_id == -1) {
-//             std::cerr << "Error: Vertex not found in the graph for edge (" << from_handle_name << " -> " << to_handle_name << ")" << std::endl;
-//             return;
-//         }
-//         edge_fwd.from_vertex = from_vertex_id;
-//         edge_fwd.to_vertex   = to_vertex_id;
-//         edge_fwd.overlap     = 0; // TODO: Now we suppose that overlap is 0
-//         _vertices[edge_fwd.from_vertex].out_edges.push_back(edge_fwd);
-//         _vertices[edge_fwd.to_vertex].in_edges.push_back(edge_fwd);
-
-//         // Reverse orientation
-//         edge edge_rev;
-//         std::string rev_from_handle_name = std::to_string(handle_graph.get_id(handle_graph.flip(e.second)));
-//         std::string rev_to_handle_name   = std::to_string(handle_graph.get_id(handle_graph.flip(e.first)));
-//         int rev_from_vertex_id = name_to_id_.at(rev_from_handle_name);
-//         int rev_to_vertex_id   = name_to_id_.at(rev_to_handle_name);
-//         // Check that the vertices exist in the graph
-//         if (rev_from_vertex_id == -1 || rev_to_vertex_id == -1) {
-//             std::cerr << "Error: Vertex not found in the graph for reverse edge (" << rev_from_handle_name << " -> " << rev_to_handle_name << ")" << std::endl;
-//             return;
-//         }
-//         edge_rev.from_vertex = rev_from_vertex_id;
-//         edge_rev.to_vertex   = rev_to_vertex_id;
-//         edge_rev.overlap     = 0; // TODO: Now we suppose that overlap is 0
-//         _vertices[edge_rev.from_vertex].out_edges.push_back(edge_rev);
-//         _vertices[edge_rev.to_vertex].in_edges.push_back(edge_rev);
-//     });
-// }
-
 
 // Read sequence data
 void read_seq_pos_data(
@@ -422,7 +361,7 @@ int main(int argc, char *const *argv) {
     // Parse penalties
     theseus::Penalties penalties(args.match, args.mismatch, args.gapo, args.gape);
     // Parse heuristics
-    theseus::Heuristics heuristics(args.density_drop, args.lag_pruning);
+    theseus::Heuristics heuristics;
     // Manage input/output files
     std::ifstream graph_file(args.graph_file);
     std::ifstream sp_file(args.sequences_and_positions_file);
@@ -432,7 +371,6 @@ int main(int argc, char *const *argv) {
     std::unordered_map<std::string, NodeId> name_to_id;
     std::unordered_map<NodeId, std::string> node_names;
     graph_from_gfa_stream(graph_file, graph, name_to_id, node_names);
-    std::cout << "Hola" << std::endl;
     // Prepare the aligner
     theseus::TheseusAligner aligner(penalties, heuristics, std::move(graph));
     // Read queries data
@@ -447,7 +385,11 @@ int main(int argc, char *const *argv) {
     for (int i = 0; i < num_sequences; ++i) {
         // Perform alignment
         std::cout << "Seq " << i << std::endl;
-        alignment = aligner.align(sequences[i], start_nodes[i], start_offsets[i]);
+        alignment = aligner.align(sequences[i], start_nodes[i], start_offsets[i], args.density_drop, args.lag_pruning);
+        std::cout << "Score = " << alignment.compute_affine_gap_score(penalties) << std::endl << std::endl;
+        if (alignment.theseus_status != THESEUS_STATUS_ALG_COMPLETED) {
+            std::cerr << "Alignment " << i << " with status " << alignment.theseus_status << " did not complete successfully" << std::endl;
+        }
         aligner.print_alignment_as_gaf(alignment, output_file, "seq_" + std::to_string(i), node_names);
     }
     // End time measurement

@@ -34,6 +34,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <sstream>
 
 #include "theseus/alignment.h"
 #include "theseus/heuristics.h"
@@ -50,8 +51,7 @@ struct CMDArgs {
     int gapo = 3;
     int gape = 1;
     // Heuristics
-    bool density_drop = false;
-    bool lag_pruning  = false;
+    bool lag_pruning = false;
     // I/O
     int output_type = 0;        // 0: MSA, 1: GFA, 2: Consensus, 3: Dot
     std::string sequences_file;
@@ -67,6 +67,7 @@ struct CMDArgs {
  */
 void read_sequences(
     std::vector<std::string> &sequences,
+    std::vector<int> &weights,
     CMDArgs &args)
 {
 
@@ -92,6 +93,11 @@ void read_sequences(
             if (num > 0) sequences.push_back(sequence);
             sequence.clear();
             num += 1;
+            // std::istringstream iss(line);
+            // char header;
+            // int weight;
+            // iss >> header >> weight;
+            // weights.push_back(weight);
         }
         else
         {
@@ -99,7 +105,7 @@ void read_sequences(
         }
     }
 
-    // Store the last sequence
+    // Store the last sequencealignments
     if (num > 0) {
       sequences.push_back(sequence);
     }
@@ -113,7 +119,7 @@ void read_sequences(
  * @brief Print the help message.
  */
 void help() {
-    std::cout << "Usage: theseus_msa [OPTIONS]\n"
+    std::cout << "Usage: pericles [OPTIONS]\n"
                  "Options:\n"
                  "  -m, --match <int>           The match penalty                                       [default=0]\n"
                  "  -x, --mismatch <int>        The mismatch penalty                                    [default=2]\n"
@@ -122,14 +128,18 @@ void help() {
                  "  -t, --output_type <int>     The output format of the multiple alignment             [default=0=MSA]\n"
                  "                               0: MSA: Standard Multiple Sequence Alignment format,\n"
                  "                               1: GFA: Output the resulting POA graph in GFA format,\n"
-                 "                               2: Consensus: Output the consensus sequence,\n"
-                 "                               3: Dot: Output in .dot format for visualization purposes.\n"
+                 "                               2: Consensus - Heaviest Bundle: Output the consensus sequence \n"
+                 "                                  based on the heaviest bundle algorithm,\n"
+                 "                               3: Consensus - Weighted Majority Voting: Output the consensus \n"
+                 "                                  sequence based on the weighted majority voting algorithm. \n"
+                 "                                  Moreover, it prints each column's weight and the gapped \n"
+                 "                                  consensus,\n"
+                 "                               4: Dot: Output in .dot format for visualization purposes.\n"
                  "                                       Only tractable for small graphs\n"
                  "  -f, --output <file>         Output file                                             [Required]\n"
                  "  -s, --sequences <file>      Dataset file                                            [Required]\n\n"
 
                  " Heuristics:\n"
-                 "  -d  --density_heuristic     Activate the drop heuristic based on advancement density.            \n"
                  "  -l  --lag_pruning           Activate the pruning of diagonals lagging behind int the alignment.  \n";
 }
 
@@ -142,14 +152,13 @@ CMDArgs parse_args(int argc, char *const *argv) {
                                           {"sequences", required_argument, 0, 's'},
                                           {"output", required_argument, 0, 'f'},
                                           {"lag_pruning", no_argument, 0, 'l'},
-                                          {"density_heuristic", no_argument, 0, 'd'},
                                           {0, 0, 0, 0}};
 
     CMDArgs args;
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "m:x:o:e:t:s:f:ld", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "m:x:o:e:t:s:f:l", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'm':
                 args.match = std::stoi(optarg);
@@ -175,9 +184,6 @@ CMDArgs parse_args(int argc, char *const *argv) {
             case 'l':
                 args.lag_pruning = true;
                 break;
-            case 'd':
-                args.density_drop = true;
-                break;
             default:
                 std::cerr << "Invalid option" << std::endl;
                 exit(1);
@@ -199,30 +205,32 @@ int main(int argc, char *const *argv) {
     }
 
     // Check ouput type is correct
-    if (args.output_type < 0 || args.output_type > 3) {
-        std::cerr << "Output type must be 0 (MSA), 1 (GFA), 2 (Consensus) or 3 (Dot)\n";
+    if (args.output_type < 0 || args.output_type > 4) {
+        std::cerr << "Output type must be 0 (MSA), 1 (GFA), 2 (Consensus), 3 (Majority Voting Consensus) or 4 (Dot)\n";
         return 1;
     }
 
     // Define alignment penalties
     theseus::Penalties penalties(args.match, args.mismatch, args.gapo, args.gape);
-
     // Determine heuristics
-    theseus::Heuristics heuristics(args.density_drop, args.lag_pruning);
-
+    theseus::Heuristics heuristics;
     // Read the sequences for the MSA
     std::vector<std::string> sequences;
-    read_sequences(sequences, args);
+    std::vector<int> weights;
+    read_sequences(sequences, weights, args);
 
     // Prepare the data
     std::vector<theseus::Alignment> alignments(sequences.size());
     std::string_view initial_seq = sequences[0];
-    theseus::TheseusMSA aligner(penalties, heuristics, initial_seq);
+    theseus::TheseusMSA aligner(penalties, heuristics, initial_seq, 1);
 
     // Alignment with Theseus
     for (int j = 1; j < sequences.size(); ++j) {
         std::cout << "Processing sequence " << j << std::endl;
-        alignments[j] = aligner.align(sequences[j], false);
+        alignments[j] = aligner.align(sequences[j], 1, args.lag_pruning);
+        if (alignments[j].theseus_status != THESEUS_STATUS_ALG_COMPLETED) {
+            std::cerr << "Alignment " << j << " with status " << alignments[j].theseus_status << " did not complete successfully" << std::endl;
+        }
         std::cout << "Score = " << alignments[j].compute_affine_gap_score(penalties) << std::endl << std::endl;
     }
 
@@ -233,9 +241,24 @@ int main(int argc, char *const *argv) {
     } else if (args.output_type == 1) {
         aligner.print_as_gfa(output_file);
     } else if (args.output_type == 2) {
-        std::string consensus = aligner.get_consensus_sequence();
+        std::string consensus = aligner.heaviest_bundle_consensus();
         output_file << ">Consensus\n" << consensus << "\n";
     } else if (args.output_type == 3) {
+        std::vector<int> consensus_weights;
+        std::string consensus_sequence, consensus_sequence_gapped;
+        aligner.majority_voting_consensus(consensus_weights, consensus_sequence, consensus_sequence_gapped);
+        output_file << ">Consensus\n" << consensus_sequence << "\n";
+        output_file << ">Gapped_consensus\n" << consensus_sequence_gapped << "\n";
+        output_file << ">Consensus_weights\n";
+        for (size_t i = 0; i < consensus_weights.size(); ++i) {
+            output_file << consensus_weights[i];
+            if (i < consensus_weights.size() - 1) {
+                output_file << " ";
+            }
+        }
+        output_file << "\n";
+
+    } else if (args.output_type == 4) {
         aligner.print_as_dot(output_file);
     }
 

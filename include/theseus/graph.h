@@ -338,6 +338,10 @@ public:
             return os;
         }
 
+        void change_reversed_flag(bool new_flag_value) {
+            reversed_ = new_flag_value;
+        }
+
         [[nodiscard]] bool is_reversed() const noexcept { return reversed_; }
 
         [[nodiscard]] SequenceView reversed() const noexcept {
@@ -358,8 +362,8 @@ public:
      */
     struct NodeView {
     public:
-        NodeView(SequenceView sequence, NodeIdRange in_nodes, NodeIdRange out_nodes)
-            : sequence(sequence), in_nodes(in_nodes), out_nodes(out_nodes) {}
+        NodeView(SequenceView sequence_, NodeIdRange in_nodes_, NodeIdRange out_nodes_)
+            : sequence(sequence_), in_nodes(in_nodes_), out_nodes(out_nodes_) {}
 
         SequenceView sequence;
         NodeIdRange in_nodes;

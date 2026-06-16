@@ -54,7 +54,7 @@ namespace theseus {
 
 using NodeId = Graph::NodeId;
 
-constexpr ptrdiff_t realloc_wavefront_policy(std::ptrdiff_t capacity,
+constexpr ptrdiff_t realloc_wavefront_policy(// std::ptrdiff_t capacity,
                                              std::ptrdiff_t required_size)
 {
     return required_size * 1.5;

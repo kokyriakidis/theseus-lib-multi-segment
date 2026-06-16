@@ -194,7 +194,7 @@ public:
 
 private:
     struct ScoreData {
-        static constexpr std::ptrdiff_t realloc_policy(std::ptrdiff_t capacity,
+        static constexpr std::ptrdiff_t realloc_policy([[maybe_unused]] std::ptrdiff_t capacity,
                                                        std::ptrdiff_t required_size) {
             return required_size * 2;
         };

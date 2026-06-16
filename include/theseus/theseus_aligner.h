@@ -111,7 +111,9 @@ namespace theseus
          */
         Alignment align(std::string_view seq,
                         NodeId &start_node,
-                        int start_offset = 0);
+                        int start_offset = 0,
+                        bool density_drop_active = false,
+                        bool lag_pruning_active = false);
 
     private:
         std::unique_ptr<TheseusAlignerImpl> aligner_impl_;

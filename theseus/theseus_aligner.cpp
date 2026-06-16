@@ -36,7 +36,7 @@ TheseusAligner::TheseusAligner(const Penalties &penalties,
                                const Heuristics &heuristics,
                                Graph &&graph)
 {
-    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(graph), false);
+    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(graph), 1, false);
 }
 
 TheseusAligner::TheseusAligner(const Penalties &penalties,
@@ -44,7 +44,7 @@ TheseusAligner::TheseusAligner(const Penalties &penalties,
                                Graph &graph)
 {
     Graph graph_copy = graph; // Make a copy of the graph to ensure that the aligner has its own instance
-    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(graph_copy), false);
+    aligner_impl_ = std::make_unique<TheseusAlignerImpl>(penalties, heuristics, std::move(graph_copy), 1, false);
 }
 
 TheseusAligner::~TheseusAligner() {}
@@ -64,14 +64,18 @@ void TheseusAligner::print_alignment_as_gaf(
  * @param seq
  * @param start_node
  * @param start_offset
+ * @param density_drop_active
+ * @param lag_pruning_active
  * @return Alignment
  */
 Alignment TheseusAligner::align(
     std::string_view seq,
     NodeId &start_node,
-    int start_offset) {
+    int start_offset,
+    bool density_drop_active,
+    bool lag_pruning_active) {
 
-    return aligner_impl_->align(seq, start_node, start_offset, false);
+    return aligner_impl_->align(seq, start_node, start_offset, 1, density_drop_active, lag_pruning_active, false, false);
 }
 
 } // namespace theseus

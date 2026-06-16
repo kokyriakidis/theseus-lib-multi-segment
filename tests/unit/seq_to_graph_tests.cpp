@@ -93,13 +93,13 @@ TEST_CASE("Check sequence-to-graph aligner") {
 
         // Set aligner's parameters
         theseus::Penalties penalties(0, 2, 3, 1);                            // Create penalties object
-        theseus::Heuristics heuristics(false, false);                        // Create heuristics object
+        theseus::Heuristics heuristics;                        // Create heuristics object
         theseus::TheseusAligner aligner(penalties, heuristics, std::move(G));       // Create aligner
 
         // Align sequences and check results
         for (int i = 0; i < start_offsets.size(); ++i) {
             theseus::Alignment alignment = aligner.align(
-                sequences[i], start_vertices[i], start_offsets[i]
+                sequences[i], start_vertices[i], start_offsets[i], false, false
             );
 
             CHECK(alignment.compute_affine_gap_score(penalties) == expected_scores[i]); // Check score

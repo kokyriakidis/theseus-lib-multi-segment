@@ -34,6 +34,9 @@
 #include <set>
 #include <algorithm>
 #include <ranges>
+#include <stack>
+#include <utility>
+#include <tuple>
 
 #include "theseus/alignment.h"
 #include "theseus/penalties.h"
@@ -61,23 +64,31 @@ public:
     TheseusAlignerImpl(const Penalties &penalties,
                        const Heuristics &heuristics,
                        Graph &&graph,
-                       bool msa);
+                       int  initial_weight,
+                       bool is_msa);
 
     /**
      * @brief Main alignment function. Aligns the given sequence to the graph
      * starting at the specified node and offset.
      *
-     * @param seq               Sequence to be aligned
-     * @param start_node        Starting node in the graph
-     * @param start_offset      Starting offset within the starting node
+     * @param seq                Sequence to be aligned
+     * @param weight             Weight of the sequence to be aligned (used for MSA)
      * @param reverse_alignment  Whether to perform reverse alignment
+     * @param is_ends_free       Whether to allow a free end on the "end" of the graph
      *
      * @return                  Alignment object
      */
     Alignment align(std::string_view seq,
-                    NodeId &start_node,
-                    int start_offset = 0,
-                    bool reverse_alignment = false);
+                    // Seq-to-graph parameters
+                    int  start_node,
+                    int  start_offset,
+                    // MSA parameters
+                    int  weight = 1,
+                    bool is_ends_free = false,
+                    // Common parameters
+                    bool reverse_alignment = false,
+                    bool density_drop_active = false,
+                    bool lag_pruning_active = false);
 
     /**
      * @brief Output the current graph in GFA format.
@@ -85,27 +96,36 @@ public:
      * @param gfa_output  Output stream to write the graph in GFA format
      * @param node_names  Vector containing the names of the nodes in the graph (in the same order as their IDs)
      */
-    void print_as_gfa(std::ofstream &gfa_output);
+    void print_as_gfa(std::ostream &gfa_output);
 
     /**
      * @brief Output the current MSA in MSA format.
      *
      * @param out_stream  Output stream to write the MSA in MSA format
      */
-    void print_as_msa(std::ofstream &out_stream);
+    void print_as_msa(std::ostream &out_stream);
 
     /**
      * @brief Return the consensus sequence from the current MSA.
      *
      * @return std::string Consensus sequence
      */
-    std::string get_consensus_sequence();
+    std::string heaviest_bundle_consensus();
+
+    /**
+     * @brief Get the weighted majority voting consensus sequence from the current
+     * MSA.
+     *
+     */
+    void majority_voting_consensus(std::vector<int> &consensus_weights,
+                                   std::string &consensus_sequence,
+                                   std::string &consensus_sequence_gapped);
 
     /**
      * @brief Print the graph in dot (graphviz) format
      *
      */
-    void print_code_graphviz(std::ofstream &out_stream);
+    void print_code_graphviz(std::ostream &out_stream);
 
     /**
      * @brief Print the resulting alignment in GAF format.
@@ -125,7 +145,9 @@ private:
      *
      */
     void new_alignment(SequenceView seq,
-                       bool reverse_alignment);
+                       bool reverse_alignment,
+                       bool density_drop_active,
+                       bool lag_pruning_active);
 
     /**
      * @brief Process a given vertex at a given _score. This means performing
@@ -299,23 +321,18 @@ private:
      * @param curr_data
      */
     void check_end_condition(
-        Cell curr_data,
-        Cell::Matrix curr_matrix);
+        Cell curr_data);
 
     /**
      * @brief Exyend a given diagonal for a given vertex and perform the necessary
      * jumps.
      *
      * @param curr_node
-     * @param curr_cell
-     * @param prev_cell
      * @param prev_pos
      * @param prev_matrix
      */
     void extend_diagonal(
         NodeId curr_node_id,
-        Cell &curr_cell,
-        Cell &prev_cell,
         Cell::pos_t prev_pos,
         Cell::Matrix from_matrix);
 
@@ -355,11 +372,9 @@ private:
      * @brief Perform a single step of the backtrace process.
      *
      * @param curr_cell
-     * @param curr_matrix
      */
     void one_backtrace_step(
-        Cell &curr_cell,
-        Cell::Matrix &curr_matrix);
+        Cell &curr_cell);
 
     /**
      * @brief Backtrace the alignment from the end vertex to the start vertex.
@@ -374,14 +389,14 @@ private:
      *
      * @param gfa_output
      */
-    void print_as_gfa_internal(std::ofstream &gfa_output);
+    void print_as_gfa_internal(std::ostream &gfa_output);
 
     /**
      * @brief Internal function to print the graph in dot (graphviz) format.
      *
      * @param out_stream Output stream to write the graph in dot format
      */
-    void print_code_graphviz_internal(std::ofstream &out_stream);
+    void print_code_graphviz_internal(std::ostream &out_stream);
 
     // Handle reverse alignment
     NodeView get_node(NodeId id);
@@ -392,16 +407,15 @@ private:
     Penalties _penalties;
     InternalPenalties _internal_penalties;
 
-    Graph _graph;   // The graph to align to
-
     std::unique_ptr<POAGraph> _poa_graph; // Partial order alignment graph for MSA
 
-    bool _is_msa;
+    bool _ends_free;
     bool _reversed_alignment;
-    // int _end_vertex;
-    int _seq_ID = 0;
+    int  _start_column;
+    int  _seq_ID = 0;
     NodeId _start_node;
-    int _start_offset;
+    NodeId _end_node;
+    int  _start_offset;
     Cell _start_pos;
     Cell::Matrix _start_matrix;
 
@@ -412,9 +426,13 @@ private:
 
     std::unique_ptr<VerticesData> _vertices_data;
 
-    SequenceView _seq;
-
     Heuristics _heuristics;
+
+    Graph _graph;   // The graph to align to
+
+    bool _is_msa;
+
+    SequenceView _seq;
 
     Alignment _alignment;
 };
