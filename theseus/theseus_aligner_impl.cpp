@@ -82,49 +82,30 @@ TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
 void TheseusAlignerImpl::compute_subgraph(NodeId start, NodeId end) {
     const size_t n = _graph.node_id_bound();
 
-    // Forward BFS from start using flat bitvector.
-    std::vector<bool> forward(n, false);
-    {
-        std::queue<NodeId> q;
-        q.push(start);
-        forward[start] = true;
-        while (!q.empty()) {
-            NodeId cur = q.front(); q.pop();
-            if (cur == end) continue;
-            NodeView nv = _graph.node(cur);
-            for (auto out_id : nv.out_nodes) {
-                if (static_cast<size_t>(out_id) < n && !forward[out_id]) {
-                    forward[out_id] = true;
-                    q.push(out_id);
-                }
-            }
-        }
-    }
-
-    // Backward BFS from end using flat bitvector.
-    std::vector<bool> backward(n, false);
+    // Single backward BFS from end (abPOA reverse-BFS-from-sink pattern).
+    //
+    // The scope is only ever queried via in_subgraph(out_node_id) on
+    // out-neighbours of nodes the WFA front has already reached. Those nodes
+    // are forward-reachable from `start` by construction, so the forward set is
+    // always satisfied at query time and contributes nothing to pruning. Only
+    // the backward set ("can this node still reach end?") prunes the search.
+    // We therefore drop the forward BFS and the intersection, replacing three
+    // O(n) allocations + two traversals with a single reverse traversal.
+    _subgraph_nodes.assign(n, false);
     {
         std::queue<NodeId> q;
         q.push(end);
-        backward[end] = true;
+        _subgraph_nodes[end] = true;
         while (!q.empty()) {
             NodeId cur = q.front(); q.pop();
             if (cur == start) continue;
             NodeView nv = _graph.node(cur);
             for (auto in_id : nv.in_nodes) {
-                if (static_cast<size_t>(in_id) < n && !backward[in_id]) {
-                    backward[in_id] = true;
+                if (static_cast<size_t>(in_id) < n && !_subgraph_nodes[in_id]) {
+                    _subgraph_nodes[in_id] = true;
                     q.push(in_id);
                 }
             }
-        }
-    }
-
-    // Intersection: nodes reachable from start that can reach end.
-    _subgraph_nodes.assign(n, false);
-    for (size_t i = 0; i < n; i++) {
-        if (forward[i] && backward[i]) {
-            _subgraph_nodes[i] = true;
         }
     }
 }
