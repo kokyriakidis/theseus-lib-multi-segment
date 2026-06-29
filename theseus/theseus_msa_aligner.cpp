@@ -95,15 +95,20 @@ TheseusMSA::~TheseusMSA() {}
  * @brief Main alignment function for the Theseus aligner.
  *
  * @param seq
- * @param reverse_alignment
- * @param is_ends_free
+ * @param weight              Sequence weight
+ * @param reverse_alignment   Whether to align in reverse
+ * @param is_ends_free        Whether to allow a free end
+ * @param density_drop_active Whether to use the density-drop heuristic
+ * @param lag_pruning_active  Whether to use the lag pruning heuristic
  * @return Alignment
  */
 Alignment TheseusMSA::align(
     std::string_view seq,
     int weight,
     bool reverse_alignment,
-    bool is_ends_free) {
+    bool is_ends_free,
+    bool density_drop_active,
+    bool lag_pruning_active) {
 
     // Error out if you are adding a backbone sequence after partial sequences
     if (!still_end_to_end && !is_ends_free) {
@@ -111,7 +116,9 @@ Alignment TheseusMSA::align(
     }
     // Update the still_end_to_end value
     still_end_to_end = !is_ends_free;
-    return msa_aligner_impl_->align(seq, weight, reverse_alignment, is_ends_free);
+    return msa_aligner_impl_->align(seq, weight, reverse_alignment, is_ends_free,
+                                    -1, 0, -1,
+                                    density_drop_active, lag_pruning_active);
 }
 
 Alignment TheseusMSA::align_from(

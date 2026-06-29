@@ -303,6 +303,9 @@ public:
         return nodes_.size() - free_node_ids_.size();
     }
 
+    // Fork-only (pericles): upper bound on NodeId values for flat-array
+    // indexing. Unlike nnodes(), this includes freed slots, so the highest
+    // valid NodeId is < node_id_bound(). Used by compute_subgraph().
     size_t node_id_bound() const {
         return nodes_.size();
     }

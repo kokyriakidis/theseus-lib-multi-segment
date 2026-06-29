@@ -66,6 +66,8 @@ TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
     else {
         _poa_graph->create_initial_graph_multi_segment(_graph, initial_weight);
     }
+
+    // Initialize aligner parameters and data structures
     _internal_penalties = InternalPenalties(penalties);
     _scope = std::make_unique<Scope>(n_scores);
     _beyond_scope = std::make_unique<BeyondScope>();
@@ -139,7 +141,9 @@ bool TheseusAlignerImpl::has_out_nodes(NodeId id) {
 }
 
 void TheseusAlignerImpl::new_alignment(SequenceView seq,
-                                       bool reverse_alignment) {
+                                       bool reverse_alignment,
+                                       bool density_drop_active,
+                                       bool lag_pruning_active) {
     _scope->new_alignment();
     _beyond_scope->new_alignment();
     _vertices_data->new_alignment();
@@ -172,10 +176,10 @@ void TheseusAlignerImpl::new_alignment(SequenceView seq,
     // Set initial alignment status
     _alignment.theseus_status = THESEUS_STATUS_OK;
     // Set heuristics
-    _heuristics.new_alignment(_internal_penalties.gape(), _seq.size());
+    _heuristics.new_alignment(_internal_penalties.gape(), _seq.size(), density_drop_active, lag_pruning_active);
     // TODO: Allow for different initial conditions. Now only global alignment.
     Cell init_condition;
-    init_condition.offset = 0;
+    init_condition.offset    = 0;
     init_condition.vertex_id = _start_node;
     init_condition.diag = _start_offset;
     init_condition.prev_pos = -1;
@@ -231,7 +235,9 @@ Alignment TheseusAlignerImpl::align(
     bool is_ends_free,
     int custom_start_node,
     int custom_start_offset,
-    int custom_end_node
+    int custom_end_node,
+    bool density_drop_active,
+    bool lag_pruning_active
   )
 {
   bool _custom_start = (custom_start_node >= 0);
@@ -245,6 +251,7 @@ Alignment TheseusAlignerImpl::align(
     _start_offset = 0;
     _end_node = _sink_node;
   }
+  // Align a sequence to a reference graph starting at a given position
   else {
     _start_node = _sink_node;
     _start_offset = 0;
@@ -266,11 +273,12 @@ Alignment TheseusAlignerImpl::align(
   auto t1 = std::chrono::steady_clock::now();
 
   // Initialize data for the new alignment
-  new_alignment(Graph::SequenceView(seq, reverse_alignment), reverse_alignment);
+  new_alignment(Graph::SequenceView(seq, reverse_alignment), reverse_alignment, density_drop_active, lag_pruning_active);
 
   auto t2 = std::chrono::steady_clock::now();
 
   _score = 0;
+  // _graph.print_code_graphviz();
   // Main alignment loop
   while (_alignment.theseus_status == THESEUS_STATUS_OK) {
     // Initial extend
@@ -588,6 +596,10 @@ void TheseusAlignerImpl::store_M_jump(NodeView curr_node,
                                       Cell::pos_t prev_pos,
                                       Cell::Matrix from_matrix) {
   // Invalidate the jumping diagonal
+  // if (_seq_ID >= 2653 && prev_cell.vertex_id == 351) {
+  //    std::cout << "Invalidating diag " << prev_cell.diag << " in vertex " << prev_cell.vertex_id << std::endl;
+  //    int vertex_id = _vertices_data->get_id(prev_cell.vertex_id);
+  // }
   _vertices_data->invalidate_m_jump(_vertices_data->get_id(prev_cell.vertex_id), prev_cell.diag);
   int pos_score = _vertices_data->get_pos(_score);
   int new_diag  = -prev_cell.offset;
@@ -660,7 +672,7 @@ void TheseusAlignerImpl::check_and_store_jumps(
   Cell::pos_t len = cell_range.end - cell_range.start, n = curr_node.sequence.size(), prev_pos;
   Cell::idx2d_t diag, offset, curr_j;
   Cell::Matrix from_matrix;
-  // Check all difaonals in the current wavefront
+  // Check all diagonals in the current wavefront
   for (int l = 0; l < len; ++l) {
     diag = curr_wavefront[cell_range.start + l].diag;
     offset = curr_wavefront[cell_range.start + l].offset;

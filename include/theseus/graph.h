@@ -599,7 +599,8 @@ public:
 
     /**
      * @brief Upper bound on NodeId values (for flat array indexing).
-     * Returns one past the highest possible NodeId.
+     * Returns one past the highest possible NodeId. Fork-only (pericles):
+     * used by subgraph scoping in the multi-segment aligner.
      */
     [[nodiscard]] size_t node_id_bound() const;
 

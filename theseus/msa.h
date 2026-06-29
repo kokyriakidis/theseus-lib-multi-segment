@@ -281,7 +281,13 @@ namespace theseus {
                 // alignment begins; pivot_column is the column within the last
                 // node where it ends.
                 int first_poa_vtx = _first_poa_vtx[backtrace.path[0]];
-                poa_path.push_back(first_poa_vtx + start_offset - 1);
+                // The "previous" POA vertex is the one immediately before the
+                // first consumed base. When start_offset == 0 this would be
+                // first_poa_vtx - 1, which can underflow below 0 for the very
+                // first interior node. Guard with -1 (treated as "no edge" by
+                // update_poa_edge) so we never index a negative vertex.
+                int prev_vtx = first_poa_vtx + start_offset - 1;
+                poa_path.push_back(prev_vtx >= 0 ? prev_vtx : -1);
                 // Then expand all bases of this node from start_offset onward
                 int node_size = compacted_G.node_size(backtrace.path[0]);
                 for (int k = start_offset; k < node_size; ++k) {
@@ -348,9 +354,18 @@ namespace theseus {
             bool new_node_exists = false;
             NodeId new_node_id;
             long unsigned int k = 0;
-            int i = start_row, l = 0, prev_v_poa = poa_path[0], new_v_poa = poa_path[0];
+            // poa_path always has at least the start vertex; guard anyway so a
+            // degenerate (empty) path from convert_path cannot dereference [0].
+            int init_v = poa_path.empty() ? -1 : poa_path[0];
+            int i = start_row, l = 0, prev_v_poa = init_v, new_v_poa = init_v;
             while (k < backtrace.edit_op.size()) {
                 if (backtrace.edit_op[k] == 'M') {  // Match
+                    // M/X/I each consume one graph vertex (poa_path[l+1]).
+                    // In local / ends-free / custom_start alignments WFA can
+                    // stop before the expanded last node is fully consumed, so
+                    // the op count may exceed poa_path. Bail out instead of
+                    // reading past the end.
+                    if (static_cast<size_t>(l + 1) >= poa_path.size()) break;
                     prev_v_poa = new_v_poa;
                     new_v_poa = poa_path[l + 1];
                     _poa_vertices[new_v_poa].sequence_IDs.push_back(seq_ID);
@@ -361,6 +376,7 @@ namespace theseus {
                     new_node_exists = false;
                 }
                 else if (backtrace.edit_op[k] == 'X') { // Mismatch
+                    if (static_cast<size_t>(l + 1) >= poa_path.size()) break;
                     prev_v_poa = new_v_poa;
                     new_v_poa = poa_path[l + 1];
                     update_poa_vertex(new_v_poa, new_node_id, new_seq[i], new_node_exists, compacted_G, seq_ID, weight);
@@ -395,19 +411,20 @@ namespace theseus {
                     update_poa_edge(prev_v_poa, new_v_poa, compacted_G);
                     i += 1;
                 }
-                else {
+                else { // Insertion in graph (gap in query): consume one vertex
+                    if (static_cast<size_t>(l + 1) >= poa_path.size()) break;
                     l += 1;
                 }
                 k += 1;
             }
             prev_v_poa = new_v_poa;
             // Add edge to the sink/source node, as no edit operation covers it?
-            if (is_end_to_end || !is_reversed) {
+            if ((is_end_to_end || !is_reversed) && !poa_path.empty()) {
                 update_poa_edge(prev_v_poa, poa_path[poa_path.size() - 1], compacted_G);
             }
             // Update sequence weight, start poa vertex and end poa vertex
             _seq_weights.push_back(weight);
-            if (new_seq.size() > 0) {
+            if (new_seq.size() > 0 && poa_path.size() > 1) {
                 _seq_starts.push_back(poa_path[1]);
                 _seq_ends.push_back(prev_v_poa);
             }

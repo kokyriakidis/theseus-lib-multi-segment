@@ -222,8 +222,10 @@ int main(int argc, char *const *argv) {
 
     // Define alignment penalties
     theseus::Penalties penalties(args.match, args.mismatch, args.gapo, args.gape);
-    // Determine heuristics
-    theseus::Heuristics heuristics(args.density_drop, args.lag_pruning);
+    // Determine heuristics. Upstream moved the per-run heuristic toggles
+    // from the Heuristics constructor into align(); construct the default
+    // object and pass the flags through each align() call below.
+    theseus::Heuristics heuristics;
     // Read the sequences for the MSA
     std::vector<std::string> sequences;
     std::vector<bool> reversed, is_ends_free;
@@ -238,7 +240,8 @@ int main(int argc, char *const *argv) {
     // Alignment with Theseus
     for (int j = 1; j < sequences.size(); ++j) {
         std::cout << "Processing sequence " << j << std::endl;
-        alignments[j] = aligner.align(sequences[j], weights[j], reversed[j], is_ends_free[j]);
+        alignments[j] = aligner.align(sequences[j], weights[j], reversed[j], is_ends_free[j],
+                                      args.density_drop, args.lag_pruning);
         std::cout << "Score = " << alignments[j].compute_affine_gap_score(penalties) << std::endl << std::endl;
     }
 

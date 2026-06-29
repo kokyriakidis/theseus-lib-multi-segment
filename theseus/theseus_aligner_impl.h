@@ -35,6 +35,9 @@
 #include <unordered_map>
 #include <algorithm>
 #include <ranges>
+#include <stack>
+#include <utility>
+#include <tuple>
 
 #include "theseus/alignment.h"
 #include "theseus/penalties.h"
@@ -69,14 +72,17 @@ public:
      * @brief Main alignment function. Aligns the given sequence to the graph
      * starting at the specified node and offset.
      *
-     * @param seq                Sequence to be aligned
-     * @param weight             Weight of the sequence to be aligned (used for MSA)
-     * @param reverse_alignment  Whether to perform reverse alignment
-     * @param is_ends_free       Whether to allow a free end on the "end" of the graph
-     * @param custom_start_node  If >= 0, use this as the start node instead of
-     *                           the default source/sink. Set to -1 (default) to
-     *                           use the standard MSA start node.
+     * @param seq                 Sequence to be aligned
+     * @param weight              Weight of the sequence to be aligned (used for MSA)
+     * @param reverse_alignment   Whether to perform reverse alignment
+     * @param is_ends_free        Whether to allow a free end on the "end" of the graph
+     * @param custom_start_node   If >= 0, use this as the start node instead of
+     *                            the default source/sink. Set to -1 (default) to
+     *                            use the standard MSA start node.
      * @param custom_start_offset Offset within the custom start node (default 0)
+     * @param custom_end_node     If >= 0, pin the alignment end to this node.
+     * @param density_drop_active Enable the density-drop WFA heuristic (upstream).
+     * @param lag_pruning_active  Enable the lag-pruning WFA heuristic (upstream).
      *
      * @return                  Alignment object
      */
@@ -86,7 +92,9 @@ public:
                     bool is_ends_free = false,
                     int custom_start_node = -1,
                     int custom_start_offset = 0,
-                    int custom_end_node = -1);
+                    int custom_end_node = -1,
+                    bool density_drop_active = false,
+                    bool lag_pruning_active = false);
 
     /**
      * @brief Output the current graph in GFA format.
@@ -150,7 +158,9 @@ private:
      *
      */
     void new_alignment(SequenceView seq,
-                       bool reverse_alignment);
+                       bool reverse_alignment,
+                       bool density_drop_active = false,
+                       bool lag_pruning_active = false);
 
     /**
      * @brief Process a given vertex at a given _score. This means performing
@@ -379,9 +389,9 @@ private:
      * @brief Perform a single step of the backtrace process.
      *
      * @param curr_cell
-     * @param curr_v
      */
-    void one_backtrace_step(Cell &curr_cell);
+    void one_backtrace_step(
+        Cell &curr_cell);
 
     /**
      * @brief Backtrace the alignment from the end vertex to the start vertex.
@@ -430,6 +440,7 @@ private:
     NodeId _source_node = 0;
     NodeId _sink_node = 2;
     Cell _start_pos;
+    Cell::Matrix _start_matrix;
 
     std::unique_ptr<ScratchPad> _scratchpad;
 
