@@ -29,6 +29,9 @@
 #include <string_view>
 #include <chrono>
 #include <atomic>
+#include <queue>
+#include <algorithm>
+#include <cstdint>
 #include "theseus_aligner_impl.h"
 
 // Cumulative timing counters for align_from profiling.
@@ -76,38 +79,63 @@ TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
     _scratchpad = std::make_unique<ScratchPad>(-1024, 1024);
 }
 
-// Compute the set of nodes in the subgraph between start and end.
-// A node is in the subgraph if it is reachable from start via forward
-// edges AND can reach end via forward edges.
-void TheseusAlignerImpl::compute_subgraph(NodeId start, NodeId end) {
+// Topological scope cache.
+//
+// Scope pruning for custom-end alignments previously ran a per-call BFS to
+// find nodes that can reach end. That is O(graph size): a reverse BFS from a
+// mid-graph end floods all its ancestors (~half the graph), even when start
+// and end are adjacent anchors. Instead we cache a topological index per node
+// (abPOA index_to_node_id pattern) and reuse it across many align_from calls.
+void TheseusAlignerImpl::build_topo() {
+    // Kahn's algorithm: assign each node a topological index. One linear pass
+    // over the whole graph, amortised across many align_from calls.
     const size_t n = _graph.node_id_bound();
+    _topo_pos.assign(n, -1);
+    _topo_max_diag = 0;
 
-    // Single backward BFS from end (abPOA reverse-BFS-from-sink pattern).
-    //
-    // The scope is only ever queried via in_subgraph(out_node_id) on
-    // out-neighbours of nodes the WFA front has already reached. Those nodes
-    // are forward-reachable from `start` by construction, so the forward set is
-    // always satisfied at query time and contributes nothing to pruning. Only
-    // the backward set ("can this node still reach end?") prunes the search.
-    // We therefore drop the forward BFS and the intersection, replacing three
-    // O(n) allocations + two traversals with a single reverse traversal.
-    _subgraph_nodes.assign(n, false);
-    {
-        std::queue<NodeId> q;
-        q.push(end);
-        _subgraph_nodes[end] = true;
-        while (!q.empty()) {
-            NodeId cur = q.front(); q.pop();
-            if (cur == start) continue;
-            NodeView nv = _graph.node(cur);
-            for (auto in_id : nv.in_nodes) {
-                if (static_cast<size_t>(in_id) < n && !_subgraph_nodes[in_id]) {
-                    _subgraph_nodes[in_id] = true;
-                    q.push(in_id);
-                }
-            }
+    std::vector<int> indeg(n, 0);
+    for (NodeId id : _graph.nodes()) {
+        NodeView nv = _graph.node(id);
+        for (auto out_id : nv.out_nodes)
+            if (static_cast<size_t>(out_id) < n) ++indeg[out_id];
+    }
+
+    std::queue<NodeId> q;
+    for (NodeId id : _graph.nodes()) {
+        if (indeg[id] == 0) q.push(id);
+        _topo_max_diag = std::max(_topo_max_diag, _graph.node_size(id));
+    }
+
+    int32_t idx = 0;
+    while (!q.empty()) {
+        NodeId cur = q.front(); q.pop();
+        _topo_pos[cur] = idx++;
+        NodeView nv = _graph.node(cur);
+        for (auto out_id : nv.out_nodes) {
+            if (static_cast<size_t>(out_id) < n && --indeg[out_id] == 0)
+                q.push(out_id);
         }
     }
+    // Any node left at -1 sits on a cycle; in_subgraph treats -1 as permissive.
+    _topo_built_bound = static_cast<int>(n);
+}
+
+void TheseusAlignerImpl::maybe_build_topo() {
+    // Rebuild when the graph has grown past the last build. Cheap amortisation:
+    // most align_from calls add only a handful of nodes, so a build serves many
+    // calls. Threshold avoids rebuilding for every single inserted base.
+    const int bound = static_cast<int>(_graph.node_id_bound());
+    if (_topo_built_bound < 0 || bound > _topo_built_bound + 32) {
+        build_topo();
+    }
+}
+
+void TheseusAlignerImpl::compute_subgraph(NodeId /*start*/, NodeId end) {
+    maybe_build_topo();
+    if (static_cast<size_t>(end) < _topo_pos.size() && _topo_pos[end] >= 0)
+        _end_topo_pos = _topo_pos[end];
+    else
+        _end_topo_pos = 0x7fffffff;   // unknown end: do not prune
 }
 
 // Get the node/reversed node depending on the alignment configuration
@@ -133,12 +161,9 @@ void TheseusAlignerImpl::new_alignment(SequenceView seq,
     // Initialize scratchpad — only consider subgraph nodes if scoped.
     int max_diag = 0, v_n;
     if (_use_subgraph) {
-        for (size_t nid = 0; nid < _subgraph_nodes.size(); ++nid) {
-            if (_subgraph_nodes[nid]) {
-                v_n = _graph.node_size(static_cast<NodeId>(nid));
-                max_diag = std::max(max_diag, v_n);
-            }
-        }
+        // max node size was accumulated during build_topo, avoiding an
+        // O(graph size) scan here.
+        max_diag = _topo_max_diag;
     } else {
         NodeIdRange nodes = _graph.nodes();
         for (const auto &node : nodes) {
@@ -248,7 +273,6 @@ Alignment TheseusAlignerImpl::align(
     compute_subgraph(_start_node, _end_node);
   } else {
     _use_subgraph = false;
-    _subgraph_nodes.clear();
   }
 
   auto t1 = std::chrono::steady_clock::now();

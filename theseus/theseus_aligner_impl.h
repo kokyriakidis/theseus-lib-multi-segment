@@ -30,6 +30,7 @@
 
 #include <memory>
 #include <string>
+#include <cstdint>
 #include <queue>
 #include <set>
 #include <unordered_map>
@@ -457,20 +458,39 @@ private:
 
     Alignment _alignment;
 
-    // When custom_end_node is set, only nodes reachable from _start_node
-    // that can reach _end_node are in the subgraph. Empty = use all nodes.
-    std::vector<bool> _subgraph_nodes;
+    // Scope pruning for custom-end alignments.
+    //
+    // A per-call BFS to find "nodes that can reach end" is O(graph size): a
+    // reverse BFS from a mid-graph end floods all its ancestors (~half the
+    // graph), even when start and end are adjacent anchors. Instead we cache a
+    // topological position per node (abPOA index_to_node_id pattern): in a DAG,
+    // X can reach end only if topo_pos[X] <= topo_pos[end]. in_subgraph then
+    // costs a single integer compare and the expensive Kahn pass is amortised
+    // across many align_from calls, rebuilt only when the graph has grown.
+    //
+    // The bound is permissive (it may admit a few non-ancestors that dead-end
+    // harmlessly) but never over-restrictive, so optimality is preserved. Nodes
+    // newer than the last rebuild default to in-scope.
+    std::vector<int32_t> _topo_pos;     // node id -> topological index, -1 = unknown
+    int _topo_built_bound = -1;         // node_id_bound at last topo build
+    int _topo_max_diag = 0;             // max node size over graph (for scratchpad sizing)
+    int32_t _end_topo_pos = 0x7fffffff; // topo_pos of current alignment's end
     bool _use_subgraph = false;
 
-    // Compute the set of nodes reachable from start that can reach end.
+    // Rebuild _topo_pos via Kahn's algorithm when the graph has grown enough.
+    void maybe_build_topo();
+    void build_topo();
+
+    // Set up scope for an alignment ending at `end` (O(1) amortised).
     void compute_subgraph(NodeId start, NodeId end);
 
     // Check if a node is in the active subgraph.
-    // New nodes added by add_alignment_poa will have IDs >= vector size,
-    // returning false (correct: they weren't in the original subgraph).
     bool in_subgraph(NodeId id) const {
-        return !_use_subgraph
-            || (static_cast<size_t>(id) < _subgraph_nodes.size() && _subgraph_nodes[id]);
+        if (!_use_subgraph) return true;
+        if (static_cast<size_t>(id) >= _topo_pos.size()) return true; // newer than build: permissive
+        int32_t p = _topo_pos[id];
+        if (p < 0) return true;                                       // unreached in build: permissive
+        return p <= _end_topo_pos;
     }
 };
 
