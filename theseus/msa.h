@@ -35,6 +35,7 @@
 #include <stack>
 #include <queue>
 #include <functional>
+#include <utility>
 
 #include "theseus/graph.h"
 #include "theseus/alignment.h"
@@ -268,7 +269,8 @@ namespace theseus {
             bool is_end_to_end,
             bool is_reversed,
             bool custom_start = false,
-            int  start_offset = 0
+            int  start_offset = 0,
+            bool is_dropped = false
         ) {
             // First vertex
             if (custom_start) {
@@ -315,8 +317,11 @@ namespace theseus {
                     poa_path.push_back(first_poa_vtx + k);
                 }
             }
-            // Last vertex (add it because it is empty)
-            if (is_reversed || is_end_to_end) {
+            // Last vertex (add it because it is empty).
+            // A dropped end-to-end sequence (END_UNREACHABLE partial backtrace)
+            // never reached the terminal node, so it must NOT push the final
+            // sentinel vertex (upstream/pericles c3715b1).
+            if (is_reversed || (is_end_to_end && !is_dropped)) {
                 poa_path.push_back(_first_poa_vtx[backtrace.path[backtrace.path.size() - 1]]);
             }
             else {
@@ -342,11 +347,12 @@ namespace theseus {
             bool is_end_to_end,
             bool is_reversed,
             bool custom_start = false,
-            int custom_start_offset = 0
+            int custom_start_offset = 0,
+            bool is_dropped = false
         ) {
             // Convert the path to the corresponding path in the poa graph
             std::vector<int> poa_path;
-            convert_path(backtrace, poa_path, compacted_G, start_column, is_end_to_end, is_reversed, custom_start, custom_start_offset);
+            convert_path(backtrace, poa_path, compacted_G, start_column, is_end_to_end, is_reversed, custom_start, custom_start_offset, is_dropped);
             // Reversed sequences are added "forward". Change access to them
             if (is_reversed) {
                 new_seq.change_reversed_flag(false);
@@ -755,7 +761,10 @@ namespace theseus {
             // w1 and w2 are aligned nodes to v1 and v2, respectively.
             int num_original_edges = augmented_poa_graph._poa_edges.size();
             for (int l = 0; l < num_original_edges; ++l) {
-                POAEdge &edge = augmented_poa_graph._poa_edges[l];
+                // Copy by value: the loop body push_back()s into _poa_edges,
+                // which can reallocate and invalidate a reference here
+                // (upstream/pericles 6389cf6).
+                POAEdge edge = augmented_poa_graph._poa_edges[l];
                 // For each edge, add an extra edge for each aligned pair
                 POAVertex &source_vertex      = augmented_poa_graph._poa_vertices[edge.source];
                 POAVertex &destination_vertex = augmented_poa_graph._poa_vertices[edge.destination];
@@ -803,22 +812,37 @@ namespace theseus {
             std::vector<bool> visited(augmented_poa_graph._poa_vertices.size(), false);
             std::stack<int> topo_stack;
 
-            // Recursive dfs
-            std::function<void(int)> dfs = [&](int v) {
-                visited[v] = true;
-                for (int edge_idx : augmented_poa_graph._poa_vertices[v].out_edges) {
-                    int next_v = augmented_poa_graph._poa_edges[edge_idx].destination;
-                    if (!visited[next_v]) {
-                        dfs(next_v);
+            // Iterative (explicit-stack) DFS topological sort. A recursive DFS
+            // overflows the call stack on large POA graphs (upstream/pericles
+            // 57d0761 + 7134bcc). The stack stores pairs {vertex, processed}:
+            // on first pop we mark visited and re-push with processed=true after
+            // pushing children; on the second pop (children done) we emit it.
+            for (size_t start_v = 0; start_v < augmented_poa_graph._poa_vertices.size(); ++start_v) {
+                std::stack<std::pair<int, bool>> st;
+                if (!visited[start_v]) {
+                    st.push({static_cast<int>(start_v), false});
+                    while (!st.empty()) {
+                        auto [v, neighbors_processed] = st.top();
+                        st.pop();
+                        if (!neighbors_processed) {
+                            // May have been visited via another path while queued.
+                            if (visited[v]) {
+                                continue;
+                            }
+                            visited[v] = true;
+                            // Re-push with the flag set so we emit it after all
+                            // its descendants (now above it on the stack).
+                            st.push({v, true});
+                            for (int edge_idx : augmented_poa_graph._poa_vertices[v].out_edges) {
+                                int next_v = augmented_poa_graph._poa_edges[edge_idx].destination;
+                                if (!visited[next_v]) {
+                                    st.push({next_v, false});
+                                }
+                            }
+                        } else {
+                            topo_stack.push(v);
+                        }
                     }
-                }
-                topo_stack.push(v);
-            };
-
-            // Perform DFS for all vertices starting in all vertices (to ensure we cover all disconnected components)
-            for (size_t v = 0; v < augmented_poa_graph._poa_vertices.size(); ++v) {
-                if (!visited[v]) {
-                    dfs(v);
                 }
             }
 

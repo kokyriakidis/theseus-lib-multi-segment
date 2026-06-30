@@ -76,12 +76,15 @@ TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
         _poa_graph->create_initial_graph_multi_segment(_graph, initial_weight);
     }
 
-    // Initialize aligner parameters and data structures
+    // Initialize aligner parameters and data structures.
+    // VerticesData must use the TRANSFORMED penalties (InternalPenalties), the
+    // same ones the DP wavefront uses; passing raw Penalties here was a scoring
+    // inconsistency (upstream/pericles fd3a372).
     _internal_penalties = InternalPenalties(penalties);
     _scope = std::make_unique<Scope>(n_scores);
     _beyond_scope = std::make_unique<BeyondScope>();
     constexpr int expected_nvertices = std::max(1024, 0); // TODO: Set the expected number of vertices
-    _vertices_data = std::make_unique<VerticesData>(penalties, n_scores, expected_nvertices);
+    _vertices_data = std::make_unique<VerticesData>(_internal_penalties, n_scores, expected_nvertices);
     _scratchpad = std::make_unique<ScratchPad>(-1024, 1024);
 }
 
@@ -366,12 +369,14 @@ Alignment TheseusAlignerImpl::align(
       int start_row = _reversed_alignment ?
                     _seq.size() - _start_pos.offset :
                     0;
+      // This is the DROPPED path (END_UNREACHABLE): the alignment never reached
+      // the terminal node, so pass is_dropped=true so convert_path omits the
+      // final sentinel vertex (upstream/pericles c3715b1).
       if (_custom_start) {
-        _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, false, _reversed_alignment, true, _start_offset);
+        _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, false, _reversed_alignment, true, _start_offset, /*is_dropped=*/true);
       }
       else {
-        // Original pericles path — unchanged
-        _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, !_ends_free, _reversed_alignment);
+        _poa_graph->add_alignment_poa(_graph, _alignment, _seq, _seq_ID, start_column, start_row, weight, !_ends_free, _reversed_alignment, false, 0, /*is_dropped=*/true);
       }
     }
   }
