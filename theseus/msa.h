@@ -54,15 +54,15 @@ namespace theseus {
             std::vector<int> associated_vtxs;   // Associated vertexes
             std::vector<int> in_edges;          // In-going vertices
             std::vector<int> out_edges;         // Out-going vertices
-            NodeId associated_node_compact;     // Corresponding node in the compact G graph
-            int weight;                         // Weight of the node
-            char value;                         // Base pair in this vertex
+            NodeId associated_node_compact = 0; // Corresponding node in the compact G graph
+            int weight = 0;                     // Weight of the node
+            char value = '-';                   // Base pair in this vertex (default gap)
     };
 
     class POAEdge {
         public:
-            int source;                         // Source vertex
-            int destination;                    // Destination vertex
+            int source = -1;                    // Source vertex
+            int destination = -1;               // Destination vertex
     };
 
     class POAGraph {
@@ -383,6 +383,11 @@ namespace theseus {
                 }
                 else if (backtrace.edit_op[k] == 'X') { // Mismatch
                     if (static_cast<size_t>(l + 1) >= poa_path.size()) break;
+                    // X consumes one query base; guard against an edit string
+                    // with more query-consuming ops than the read piece has
+                    // bases (would read past new_seq and inject garbage bytes
+                    // into the MSA via the unchecked SequenceView::operator[]).
+                    if (static_cast<size_t>(i) >= new_seq.size()) break;
                     prev_v_poa = new_v_poa;
                     new_v_poa = poa_path[l + 1];
                     update_poa_vertex(new_v_poa, new_node_id, new_seq[i], new_node_exists, compacted_G, seq_ID, weight);
@@ -391,6 +396,9 @@ namespace theseus {
                     l += 1;
                 }
                 else if (backtrace.edit_op[k] == 'D') { // Deletion
+                    // D consumes one query base; same guard as the X branch
+                    // (avoid reading past new_seq -> garbage bytes in the MSA).
+                    if (static_cast<size_t>(i) >= new_seq.size()) break;
                     // Add the new vertex
                     POAVertex new_vertex;
                     new_vertex.value  = new_seq[i];

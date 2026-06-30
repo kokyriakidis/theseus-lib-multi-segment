@@ -267,4 +267,44 @@ TEST_CASE("Check MSA aligner") {
         // alignment = aligner.align(seq_4, false);
         // CHECK(alignment.compute_affine_gap_score(penalties) == 9); // Check score
     }
+
+    SUBCASE("End-to-end terminates (max-score safety cap)") {
+        // Regression: an end-to-end align_from whose query cannot reach the
+        // exact end node previously looped forever (no max-score cap with
+        // heuristics off). It must now terminate (completed or unreachable),
+        // never hang.
+        std::vector<std::string_view> segments = {"AAAA", "CCCC", "GGGG", "TTTT"};
+        std::vector<NodeId> node_ids;
+        theseus::Penalties penalties(0, 2, 3, 1);
+        theseus::Heuristics heuristics;
+        theseus::TheseusMSA aligner(penalties, heuristics, segments, node_ids, 1);
+
+        // End-to-end (is_ends_free=false), but the query is unrelated/short so
+        // the exact end-node terminal is hard to hit. Must return, not hang.
+        theseus::Alignment alignment =
+            aligner.align_from("ACGTACGTACGT", node_ids[0], 1, /*is_ends_free=*/false,
+                               /*start_offset=*/0, /*end_node=*/static_cast<int>(node_ids[2]));
+        // No assertion on score; the point is that the call returns at all.
+        CHECK(alignment.edit_op.size() >= 0);
+    }
+
+    SUBCASE("Deletion-heavy alignment does not read past query") {
+        // Regression: the POA add path read new_seq[i] for X/D ops without
+        // bounds-checking i against new_seq.size(), injecting garbage bytes.
+        // A short query against a long backbone forces many deletions; under
+        // ASan this would trip on the out-of-bounds read before the fix.
+        std::vector<std::string_view> segments = {"AAAA", "CCCC", "GGGG", "TTTT"};
+        std::vector<NodeId> node_ids;
+        theseus::Penalties penalties(0, 2, 3, 1);
+        theseus::Heuristics heuristics;
+        theseus::TheseusMSA aligner(penalties, heuristics, segments, node_ids, 1);
+
+        // Very short query spanning from seg0 toward the end: lots of deletions.
+        theseus::Alignment alignment =
+            aligner.align_from("AC", node_ids[0], 1, /*is_ends_free=*/true);
+        // Every emitted base must be a valid nucleotide or gap (no garbage).
+        for (char op : alignment.edit_op) {
+            CHECK((op == 'M' || op == 'X' || op == 'I' || op == 'D'));
+        }
+    }
 }

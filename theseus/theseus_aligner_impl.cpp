@@ -299,9 +299,38 @@ Alignment TheseusAlignerImpl::align(
   auto t2 = std::chrono::steady_clock::now();
 
   _score = 0;
+
+  // Hard safety cap on the score.
+  //
+  // The main loop advances the score by 1 each iteration and only terminates
+  // when check_end_condition flips the status to COMPLETED or a heuristic stops
+  // it. With heuristics disabled (the dinara default) there is no heuristic
+  // stop, so an end-to-end alignment whose terminal condition is never satisfied
+  // (e.g. the wavefront never lands exactly on _end_node with the query fully
+  // consumed) would loop forever. Bound the score by the trivial all-indel
+  // upper bound: any optimal alignment costs no more than deleting the whole
+  // reference path and inserting the whole query. If we exceed that, the end is
+  // unreachable under the current configuration -> stop with END_UNREACHABLE
+  // instead of hanging.
+  long ref_len = 0;
+  for (NodeId nid : _graph.nodes()) {
+    ref_len += _graph.node_size(nid);
+  }
+  const long qlen = static_cast<long>(_seq.size());
+  const long gape = std::max(1, _internal_penalties.gape());
+  const long gapo = std::max(0, _internal_penalties.gapo());
+  const long mism = std::max(0, _internal_penalties.mism());
+  // 2*gapo (open an indel on each side) + gape over both lengths + a full
+  // mismatch column over the query, with a 2x margin for transform/rounding.
+  const long max_score = 2 * (2 * gapo + (ref_len + qlen) * gape + qlen * mism) + 16;
+
   // _graph.print_code_graphviz();
   // Main alignment loop
   while (_alignment.theseus_status == THESEUS_STATUS_OK) {
+    if (static_cast<long>(_score) > max_score) {
+      _alignment.theseus_status = THESEUS_STATUS_END_UNREACHABLE;
+      break;
+    }
     // Initial extend
     if (_score == 0) {
       NodeView start_node = get_node(_start_node);
