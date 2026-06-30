@@ -164,7 +164,8 @@ namespace theseus
          *                      number of distinct sequences.
          */
         void print_as_msa(std::ostream &out_stream, int num_sequences = -1,
-                          const std::vector<std::string> *seq_names = nullptr);
+                          const std::vector<std::string> *seq_names = nullptr,
+                          bool include_consensus = true);
 
 
         /**

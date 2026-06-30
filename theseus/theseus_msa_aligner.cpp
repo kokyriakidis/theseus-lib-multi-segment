@@ -155,8 +155,9 @@ void TheseusMSA::print_as_gfa(std::ostream &out_stream) {
  *
  */
 void TheseusMSA::print_as_msa(std::ostream &out_stream, int num_sequences,
-                              const std::vector<std::string> *seq_names) {
-    msa_aligner_impl_->print_as_msa(out_stream, num_sequences, seq_names);
+                              const std::vector<std::string> *seq_names,
+                              bool include_consensus) {
+    msa_aligner_impl_->print_as_msa(out_stream, num_sequences, seq_names, include_consensus);
 }
 
 MSAMatrix TheseusMSA::get_msa_matrix(int num_sequences,

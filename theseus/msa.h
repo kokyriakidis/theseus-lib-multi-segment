@@ -743,7 +743,8 @@ namespace theseus {
                                     std::vector<int> &consensus_weights,
                                     std::vector<std::vector<char>> &msa,
                                     size_t &source_id,
-                                    size_t &sink_id) {
+                                    size_t &sink_id,
+                                    bool include_consensus = true) {
             // Create an augmented graph to ensure MSA integrity (to ensure valid topological order)
             POAGraph augmented_poa_graph;
             augmented_poa_graph._poa_vertices = _poa_vertices;
@@ -859,9 +860,11 @@ namespace theseus {
                 }
             }
 
-            // Create MSA matrix
+            // Create MSA matrix.
+            // Rows = num_sequences + 1 (the +1 is the original/backbone node).
+            // When include_consensus is set, one extra row holds the consensus.
             int columns = column_index;   // Number of columns in the MSA
-            int rows = num_sequences + 2; // Number of sequences  (+1 for original node +1 for consensus sequence)
+            int rows = num_sequences + 1 + (include_consensus ? 1 : 0);
             msa.resize(rows, std::vector<char>(columns, '-'));
 
             // Fill the MSA with the aligned sequences (except first and last nodes)
@@ -877,6 +880,13 @@ namespace theseus {
             }
             source_id = node_to_column[0];
             sink_id   = node_to_column[_end_vtx_poa];
+
+            // Skip the (potentially expensive) consensus computation entirely
+            // when the caller does not need it. The MSA matrix above already
+            // holds all input rows; no consensus row was allocated.
+            if (!include_consensus) {
+                return;
+            }
 
             ///////////////////// Majority voting consensus ////////////////////
             // Create two vectors indicating the weighted number of sequences that
@@ -952,14 +962,15 @@ namespace theseus {
          * @param output_file
          */
         void poa_to_fasta(int num_sequences, std::ostream &out_file,
-                          const std::vector<std::string> *seq_names = nullptr) {
+                          const std::vector<std::string> *seq_names = nullptr,
+                          bool include_consensus = true) {
             // Get column ordering and nodes in each column
             std::vector<int> consensus_weights;
             std::vector<std::vector<char>> msa;
             std::string consensus_sequence;
             std::string consensus_sequence_gapped;
             size_t source_id, sink_id;
-            poa_fasta_and_majority(num_sequences, consensus_sequence, consensus_sequence_gapped, consensus_weights, msa, source_id, sink_id);
+            poa_fasta_and_majority(num_sequences, consensus_sequence, consensus_sequence_gapped, consensus_weights, msa, source_id, sink_id, include_consensus);
 
             // Print the MSA
             for (size_t i = 0; i < msa.size(); ++i) {

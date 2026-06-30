@@ -974,8 +974,9 @@ std::vector<uint8_t> TheseusAlignerImpl::get_msa_matrix(int num_sequences,
 
 // Print as msa (can only call from TheseusMSA)
 void TheseusAlignerImpl::print_as_msa(std::ostream &out_stream, int num_sequences,
-                                      const std::vector<std::string> *seq_names) {
-  _poa_graph->poa_to_fasta(num_sequences >= 0 ? num_sequences : _seq_ID, out_stream, seq_names);
+                                      const std::vector<std::string> *seq_names,
+                                      bool include_consensus) {
+  _poa_graph->poa_to_fasta(num_sequences >= 0 ? num_sequences : _seq_ID, out_stream, seq_names, include_consensus);
 }
 
 

@@ -111,7 +111,8 @@ public:
      * @param out_stream  Output stream to write the MSA in MSA format
      */
     void print_as_msa(std::ostream &out_stream, int num_sequences = -1,
-                      const std::vector<std::string> *seq_names = nullptr);
+                      const std::vector<std::string> *seq_names = nullptr,
+                      bool include_consensus = true);
 
     std::vector<uint8_t> get_msa_matrix(int num_sequences, int &n_rows, int &n_cols);
 
