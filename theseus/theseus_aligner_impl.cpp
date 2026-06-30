@@ -42,6 +42,12 @@ std::atomic<int64_t> g_backtrace_ns{0};
 std::atomic<int64_t> g_poa_update_ns{0};
 std::atomic<int64_t> g_align_calls{0};
 std::atomic<int64_t> g_total_score{0};
+// Test-only hooks for the rigorous optimality test (opt_rigorous.cpp). They let
+// a caller dry-run an alignment (no graph mutation) and force the unscoped full
+// search, so scoped vs unscoped cost can be compared on byte-identical state.
+std::atomic<bool> g_dry_run{false};
+std::atomic<bool> g_force_unscoped{false};
+std::atomic<int>  g_last_score{0};
 
 namespace theseus {
 
@@ -81,61 +87,62 @@ TheseusAlignerImpl::TheseusAlignerImpl(const Penalties &penalties,
 
 // Topological scope cache.
 //
-// Scope pruning for custom-end alignments previously ran a per-call BFS to
-// find nodes that can reach end. That is O(graph size): a reverse BFS from a
-// mid-graph end floods all its ancestors (~half the graph), even when start
-// and end are adjacent anchors. Instead we cache a topological index per node
-// (abPOA index_to_node_id pattern) and reuse it across many align_from calls.
-void TheseusAlignerImpl::build_topo() {
-    // Kahn's algorithm: assign each node a topological index. One linear pass
-    // over the whole graph, amortised across many align_from calls.
+// Scope pruning for custom-end alignments restricts the DP to a subgraph. A
+// naive reverse BFS from end (nodes that can reach end) is O(graph size): from a
+// mid-graph end it floods all ancestors (~half the graph) even for adjacent
+// anchors. Worse, reverse-from-end is the WRONG set for ends-free alignment: the
+// optimal can stop on a node forward-reachable from start that bypasses end
+// entirely (past end in topo order, not an ancestor or descendant of it). The
+// scope below is instead a bounded forward BFS from start, which is both local
+// and provably complete for ends-free optimality.
+void TheseusAlignerImpl::compute_subgraph(NodeId start, NodeId /*end*/) {
     const size_t n = _graph.node_id_bound();
-    _topo_pos.assign(n, -1);
-    _topo_max_diag = 0;
 
-    std::vector<int> indeg(n, 0);
-    for (NodeId id : _graph.nodes()) {
-        NodeView nv = _graph.node(id);
-        for (auto out_id : nv.out_nodes)
-            if (static_cast<size_t>(out_id) < n) ++indeg[out_id];
-    }
+    // Forward depth bound (optimality-preserving for ends-free alignment).
+    //
+    // An ends-free alignment terminates when the query is exhausted (or reaches
+    // end). It advances the node cursor only via match/mismatch (consumes a query
+    // base) or deletion (consumes none). Let Lq = query length and let the
+    // all-insertion alignment (cost gapo + Lq*gape, advancing zero nodes) be an
+    // upper bound on the optimum. Then:
+    //   #match/mismatch <= Lq
+    //   #deletion       <= (gapo + Lq*gape)/gape = Lq + gapo/gape
+    // so the node cursor advances at most 2*Lq + gapo/gape times, and each
+    // advance crosses at most one out-edge. Hence no optimal path can reach a
+    // node further than this many forward edges from start. A BFS from start to
+    // that depth therefore admits EVERY node any optimal ends-free alignment can
+    // use -> strictly optimal. It is anchored on start (forward reach), not on
+    // end's ancestry, which is why it captures bypass branches the old topo+tail
+    // scope missed (e.g. a node past end on a branch that skips end).
+    const int Lq   = _scope_slack > 0 ? _scope_slack : 1;
+    const int gape = std::max(1, _internal_penalties.gape());
+    const int gapo = std::max(0, _internal_penalties.gapo());
+    _scope_depth = 2 * Lq + gapo / gape + 2;   // +2 margin
 
-    std::queue<NodeId> q;
-    for (NodeId id : _graph.nodes()) {
-        if (indeg[id] == 0) q.push(id);
-        _topo_max_diag = std::max(_topo_max_diag, _graph.node_size(id));
-    }
+    if (_fwd_stamp.size() < n) _fwd_stamp.resize(n, 0);
+    ++_fwd_gen;
+    if (_fwd_gen == 0) { std::fill(_fwd_stamp.begin(), _fwd_stamp.end(), 0); _fwd_gen = 1; }
 
-    int32_t idx = 0;
-    while (!q.empty()) {
-        NodeId cur = q.front(); q.pop();
-        _topo_pos[cur] = idx++;
-        NodeView nv = _graph.node(cur);
-        for (auto out_id : nv.out_nodes) {
-            if (static_cast<size_t>(out_id) < n && --indeg[out_id] == 0)
-                q.push(out_id);
+    // BFS from start, marking reachable nodes within _scope_depth edges, and
+    // track the max node size among them for correct scratchpad sizing.
+    _topo_max_diag = 1;
+    if (static_cast<size_t>(start) < n) {
+        std::queue<std::pair<NodeId,int>> q;
+        q.push({start, 0});
+        _fwd_stamp[start] = _fwd_gen;
+        _topo_max_diag = std::max(_topo_max_diag, _graph.node_size(start));
+        while (!q.empty()) {
+            auto [cur, d] = q.front(); q.pop();
+            if (d >= _scope_depth) continue;
+            for (auto out_id : _graph.node(cur).out_nodes) {
+                if (static_cast<size_t>(out_id) < n && _fwd_stamp[out_id] != _fwd_gen) {
+                    _fwd_stamp[out_id] = _fwd_gen;
+                    _topo_max_diag = std::max(_topo_max_diag, _graph.node_size(out_id));
+                    q.push({out_id, d + 1});
+                }
+            }
         }
     }
-    // Any node left at -1 sits on a cycle; in_subgraph treats -1 as permissive.
-    _topo_built_bound = static_cast<int>(n);
-}
-
-void TheseusAlignerImpl::maybe_build_topo() {
-    // Rebuild when the graph has grown past the last build. Cheap amortisation:
-    // most align_from calls add only a handful of nodes, so a build serves many
-    // calls. Threshold avoids rebuilding for every single inserted base.
-    const int bound = static_cast<int>(_graph.node_id_bound());
-    if (_topo_built_bound < 0 || bound > _topo_built_bound + 32) {
-        build_topo();
-    }
-}
-
-void TheseusAlignerImpl::compute_subgraph(NodeId /*start*/, NodeId end) {
-    maybe_build_topo();
-    if (static_cast<size_t>(end) < _topo_pos.size() && _topo_pos[end] >= 0)
-        _end_topo_pos = _topo_pos[end];
-    else
-        _end_topo_pos = 0x7fffffff;   // unknown end: do not prune
 }
 
 // Get the node/reversed node depending on the alignment configuration
@@ -161,8 +168,8 @@ void TheseusAlignerImpl::new_alignment(SequenceView seq,
     // Initialize scratchpad — only consider subgraph nodes if scoped.
     int max_diag = 0, v_n;
     if (_use_subgraph) {
-        // max node size was accumulated during build_topo, avoiding an
-        // O(graph size) scan here.
+        // max node size in the scope, accumulated during the forward BFS in
+        // compute_subgraph, avoiding an O(graph size) scan here.
         max_diag = _topo_max_diag;
     } else {
         NodeIdRange nodes = _graph.nodes();
@@ -269,8 +276,14 @@ Alignment TheseusAlignerImpl::align(
 
   // Compute subgraph scope when a custom end node is set.
   if (_custom_start && custom_end_node >= 0) {
-    _use_subgraph = true;
-    compute_subgraph(_start_node, _end_node);
+    if (g_force_unscoped.load(std::memory_order_relaxed)) {
+      _use_subgraph = false;
+      _end_node = (custom_end_node >= 0) ? static_cast<NodeId>(custom_end_node) : _sink_node;
+    } else {
+      _use_subgraph = true;
+      _scope_slack = static_cast<int>(seq.size());   // query length, used as Lq
+      compute_subgraph(_start_node, _end_node);
+    }
   } else {
     _use_subgraph = false;
   }
@@ -304,6 +317,8 @@ Alignment TheseusAlignerImpl::align(
     _vertices_data->new_score(_score);
   }
   _score -= 1;
+  { g_last_score.store(_score, std::memory_order_relaxed);
+    if (g_dry_run.load(std::memory_order_relaxed)) return _alignment; }
 
   auto t3 = std::chrono::steady_clock::now();
 

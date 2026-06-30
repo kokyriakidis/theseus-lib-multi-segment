@@ -471,15 +471,18 @@ private:
     // The bound is permissive (it may admit a few non-ancestors that dead-end
     // harmlessly) but never over-restrictive, so optimality is preserved. Nodes
     // newer than the last rebuild default to in-scope.
-    std::vector<int32_t> _topo_pos;     // node id -> topological index, -1 = unknown
-    int _topo_built_bound = -1;         // node_id_bound at last topo build
-    int _topo_max_diag = 0;             // max node size over graph (for scratchpad sizing)
-    int32_t _end_topo_pos = 0x7fffffff; // topo_pos of current alignment's end
-    bool _use_subgraph = false;
+    int _topo_max_diag = 0;             // max node size in scope (for scratchpad sizing)
 
-    // Rebuild _topo_pos via Kahn's algorithm when the graph has grown enough.
-    void maybe_build_topo();
-    void build_topo();
+    // Forward-from-start scope (optimality-preserving). _fwd_stamp[id]==_fwd_gen
+    // marks every node reachable from start within _scope_depth forward edges.
+    // Provably complete: an ends-free optimal path advances the node cursor at
+    // most once per query base + once per deletion, so it cannot reach further
+    // than _scope_depth from start (see compute_subgraph).
+    std::vector<uint32_t> _fwd_stamp;
+    uint32_t _fwd_gen = 0;
+    int _scope_depth = 0;
+    int _scope_slack = 0;               // query length, used as Lq for the bound
+    bool _use_subgraph = false;
 
     // Set up scope for an alignment ending at `end` (O(1) amortised).
     void compute_subgraph(NodeId start, NodeId end);
@@ -487,10 +490,11 @@ private:
     // Check if a node is in the active subgraph.
     bool in_subgraph(NodeId id) const {
         if (!_use_subgraph) return true;
-        if (static_cast<size_t>(id) >= _topo_pos.size()) return true; // newer than build: permissive
-        int32_t p = _topo_pos[id];
-        if (p < 0) return true;                                       // unreached in build: permissive
-        return p <= _end_topo_pos;
+        // Admit exactly the nodes reachable from start within _scope_depth edges
+        // (computed in compute_subgraph). Nodes newer than the BFS (id beyond the
+        // stamp vector) are permissive — they were created after scope setup.
+        if (static_cast<size_t>(id) >= _fwd_stamp.size()) return true;
+        return _fwd_stamp[id] == _fwd_gen;
     }
 };
 
